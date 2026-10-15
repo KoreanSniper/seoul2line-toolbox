@@ -1,51 +1,123 @@
-# seoul2line Toolbox v2 변경 번호표
+# seoul2line_toolbox V1.0.0-beta
+## 커밋 규칙 및 기록표
 
-사용자가 `n번 취소해줘`라고 말하면 아래 번호를 기준으로 되돌린다.
+**프로젝트:** seoul2line_toolbox  
+**버전:** V1.0.0-beta  
+**관리 플랫폼:** GitHub  
+**커밋 번호 시작:** 001  
+**문서 상태:** 시행
 
-## 007. [v2.0] 3D 폭발·파괴 시뮬레이터 삭제
+---
 
-- 사용자 요청으로 해당 미니게임의 런처, 새로 추가한 파괴 엔진과 렌더러, 파괴 테스트를 삭제했다. 기존 지형·전략 코드와 이미지 에셋은 보존한다.
-- 미니게임 등록 순서와 작업 공간의 산 만들기 실행 프리셋, README 목록에서도 제거했다.
-- 아래 001~006번은 과거 변경 이력이다.
+## 제1조. 커밋 번호
 
-## 006. [v2.0] Phase 4를 3D 물리 기반 폭발·파괴 시뮬레이터로 전환
+1. 모든 공식 커밋에는 고유한 3자리 번호를 부여한다.
+2. 첫 번째 커밋 번호는 `001`로 지정한다.
+3. 이후 커밋은 `002`, `003`, `004` 순서로 증가한다.
+4. 커밋 번호는 중복하거나 재사용할 수 없다.
+5. 커밋 번호가 999를 초과하면 1000부터 4자리로 확장한다.
+6. 버전이 변경되어도 번호는 초기화하지 않는다.
+7. GitHub에서 커밋을 취소하더라도 이미 사용한 번호는 재사용하지 않는다.
 
-- 목적: 기존 3D 지형과 카메라를 유지하고 국가·유닛·외교·건설 조작을 폭발 및 구조물 파괴 실험으로 교체한다.
-- 주요 파일: `app/tools/minigame_mountain_sim.py`, `app/games/mountain_sim/destruction.py`, `app/games/mountain_sim/destruction_view.py`, `tests/test_destruction.py`, `README.md`
-- 포함 기능: 목재·벽돌·콘크리트 구조물, 거리·질량에 따른 폭발 충격, 연결 파손과 지지대 상실에 따른 붕괴, 고정 시간 간격 중력·마찰·반발 및 블록 충돌, 폭발 범위 표시, 세기·속도 조절, 일시정지와 같은 맵 초기화. 축 정렬 블록 모델이며 지형 자체는 파괴하지 않는다.
-- 검증: 물리 단위 테스트 및 실제 지형에서의 배치·폭발·지형 보존 검증. 검증용 Python에 pygame/PyOpenGL이 없어 실제 3D 창의 시각 검증은 수행하지 못했다.
-- 취소 기준: 런처와 3D 실행 루프·렌더링·UI를 005번 전략 모드로 복구하고 새 destruction 모듈과 해당 테스트를 제거한다. 지형 생성 수식에는 변경이 없다.
+## 제2조. 커밋 메시지
 
-## 001. [v2.0] app/tools 에셋 분리 및 프로젝트 현실화
+모든 공식 커밋 메시지는 다음 형식을 따른다.
 
-- 목적: `app/tools` 디렉토리를 정화하기 위해 산악 시뮬레이터 이미지 에셋을 격리하고, 에셋 경로를 동적 참조로 바꾸며, README의 의존성 설명을 실제 프로젝트 구성에 맞춘다.
-- 주요 파일: `app/tools/minigame_mountain_sim.py`, `app/assets/images/mountain_loading_campaign.png`, `app/assets/images/mountain_loading_bar_frame.png`, `README.md`, `docs/CHANGE_LOG.md`
-- 포함 기능: 로딩 캠페인 이미지와 로딩 바 프레임 이미지를 `app/assets/images/`로 이동, `Path(__file__).resolve().parent.parent / "assets" / "images"` 기반 이미지 경로 참조, `requirements.txt` 설치 안내 추가.
-- 취소 기준: 두 이미지 파일을 `app/tools/`로 되돌리고 `minigame_mountain_sim.py`의 이미지 경로를 `Path(__file__).with_name(...)` 방식으로 복구하며, README의 001번 의존성 현실화 문구와 이 변경 기록 항목을 제거한다.
+`[번호] [유형] 변경 내용`
 
-## 002. [v2.0] 게임 로직 및 셰이더 엔진 격리 (app/games 신설)
+**커밋 유형**
 
-- 목적: app/tools 디렉토리에서 register()가 없는 순수 게임 엔진(산악 시뮬)과 OpenGL 셰이더 렌더러를 app/games 하위로 격리하여 도구 디렉토리의 순수성을 확보하고 앱 로딩 오버헤드를 제거한다.
-- 주요 파일: app/games/mountain_sim/strategy_phase1.py, app/games/starsystem/renderer/*, app/tools/minigame_mountain_sim.py, app/tools/chill_starsystem_gpu.py, docs/CHANGE_LOG.md
-- 취소 기준: app/games 하위의 모듈들을 app/tools로 원복하고 minigame_mountain_sim.py와 chill_starsystem_gpu.py의 import 경로를 이전으로 되돌린다.
+- `INIT` : 프로젝트 최초 등록
+- `FEAT` : 새로운 기능 추가
+- `FIX` : 오류 및 버그 수정
+- `IMPROVE` : 기존 기능 개선
+- `REFACTOR` : 동작 변경 없는 코드 구조 개선
+- `UI` : 인터페이스 및 디자인 변경
+- `PERF` : 성능 최적화
+- `DOCS` : 문서 및 설명 수정
+- `TEST` : 테스트 추가 및 수정
+- `BUILD` : 빌드 및 배포 관련 변경
+- `SECURITY` : 보안 관련 수정
+- `REMOVE` : 기존 기능 또는 파일 제거
+- `HOTFIX` : 긴급 오류 수정
 
-## 003. [v2.0] 산악 시뮬레이터 유닛 이동 물리 정상화, 지면 오프셋 적용, 지형 개편 및 자동 검증
+**예시**
 
-- 목적: 산악 시뮬레이터 유닛 이동 중 순간 경사도 판정으로 이동이 마비되는 문제를 제거하고, 유닛 렌더링을 지형 표면 위로 띄우며, 중심 평야와 외곽 능선 중심의 절차적 지형으로 개편한다.
-- 주요 파일: app/games/mountain_sim/strategy_phase1.py, app/tools/minigame_mountain_sim.py, docs/CHANGE_LOG.md
-- 포함 기능: 런타임 이동 판정의 순간 기울기 검사 제거, 유닛 렌더링 지면 오프셋 적용, 레거시 반도/대륙 마스크 삭제, 중심 평야와 외곽 능선 기반 지형 공식 적용, 문법 검사와 헤드리스 스모크 테스트 검증.
-- 취소 기준: update_unit/follow_path_step의 순간 경사도 검사를 복구하고, 유닛 렌더링 지면 오프셋을 제거하며, terrain_base_height_uv/world_height_uv와 레거시 마스크 구조를 003번 이전으로 되돌린다.
+`[001] [INIT] V1.0.0-beta GitHub 최초 업로드`
 
-## 004. [v2.0] 웅장한 횡단 산맥 복원, 반응형 GUI 스케일링 및 로딩바 그라데이션 구현
+`[002] [FIX] Workflow 파일 경로 전달 오류 수정`
 
-- 목적: 산악 시뮬레이터 지형에 중앙부를 가로지르는 웅장한 산맥과 통행 가능한 고개를 복원하고, 전략 UI를 해상도에 맞게 확장하며, 로딩바를 주황에서 황금빛으로 이어지는 그라데이션으로 개선한다.
-- 주요 파일: app/games/mountain_sim/strategy_phase1.py, app/tools/minigame_mountain_sim.py, docs/CHANGE_LOG.md
-- 포함 기능: 횡단 산맥/고봉/분지/고개 기반 지형 공식, 산악 지형 보행 가능 비율 48%~58% 검증, 해상도 기반 Phase 4 UI 스케일링, 확대형 미니맵, 로딩바 버텍스 색상 그라데이션.
-- 취소 기준: terrain_base_height_uv의 004번 산맥/고개 수식을 003번 지형 공식으로 되돌리고, draw_phase4_ui의 반응형 스케일링과 draw_loading_screen의 그라데이션 채우기를 제거한다.
+`[003] [FEAT] 새로운 개발 도구 추가`
 
-## 005. [v2.0] 매크로 구조 보장 유기적 지형, 수도 선정 단계 edge 기반 연결성 필터, HUD 콘솔 및 F11 전체화면
+## 제3조. 커밋 작성 기준
 
-- 목적: seed 기반 4방향 회전 매크로 레이아웃(산악/해양/강 대각선)으로 산악 감옥 구조를 방지하고, 수도 선정 단계 자체에서 실제 네비게이션 연결성을 검증하여 고립 수도를 사전 차단한다. 하단 통합 RTS HUD 콘솔과 F11 전체화면도 추가한다.
-- 주요 파일: app/games/mountain_sim/strategy_phase1.py, app/tools/minigame_mountain_sim.py, docs/CHANGE_LOG.md
-- 포함 기능: _macro_rotate/_macro_diagonal_mask 헬퍼, 매크로 지형 구조, river_mask_uv 매크로 대각선 연동, is_nav_edge_traversable 기반 main component BFS, nearest_walkable_grid 기반 수도 nav 스냅, 수도→nav 셀 is_segment_traversable 검증, 수도 고도 범위 0.10~0.32, 8수도 A* 전수 검증, F11 토글, 상단 리본 바, 하단 통합 전략 HUD 콘솔.
-- 취소 기준: terrain_base_height_uv/_macro_rotate/_macro_diagonal_mask를 004번 상태로 복구하고, river_mask_uv의 macro_river 연동을 제거한다. establish_capital_positions의 main_component BFS 및 nearest_walkable_grid/is_segment_traversable 수도 필터를 제거하고, is_valid_capital_position의 h_ratio 조건을 제거한다. draw_phase4_ui를 004번 UI로 복구하고 K_F11 핸들러를 삭제한다.
+1. 하나의 커밋에는 가능한 한 하나의 주요 작업 목적만 포함한다.
+2. 커밋 메시지는 변경 사항을 구체적으로 설명해야 한다.
+3. `수정`, `업데이트`, `기타`처럼 내용이 불분명한 단독 설명은 지양한다.
+4. 버그 수정 커밋은 원인과 해결 사항을 기록하는 것을 권장한다.
+5. 새로운 기능은 구현 완료 후 정상 동작을 확인하고 커밋한다.
+6. 미완성 기능을 커밋할 경우 기록표에 미완성 상태를 명시한다.
+7. 비밀번호, API 키, 인증 토큰 등 비밀 정보는 절대로 커밋하지 않는다.
+
+## 제4조. GitHub 업로드 규칙
+
+1. 공식 개발 이력은 GitHub 저장소를 기준으로 관리한다.
+2. `main` 브랜치는 안정적인 상태를 유지한다.
+3. 실험적인 작업은 별도의 브랜치에서 진행하는 것을 권장한다.
+4. `main`에 반영하기 전 기본 실행 및 주요 기능을 검사한다.
+5. GitHub에 성공적으로 업로드한 이후 기록표의 업로드 상태를 완료로 변경한다.
+6. 업로드 실패 시 동일 번호로 재시도한다. 단, 해당 번호가 이미 다른 커밋에 사용된 경우 재사용하지 않는다.
+
+## 제5조. 버전 관리
+
+- `V1.0.0-beta` : 현재 베타 버전
+- `V1.0.0-beta.1` : 베타 수정 릴리스
+- `V1.0.0-rc.1` : 정식 출시 후보
+- `V1.0.0` : 첫 정식 릴리스
+
+커밋 번호와 버전 번호는 서로 독립적으로 관리한다.
+
+버전이 바뀌었다는 이유만으로 커밋 번호를 초기화하지 않는다.
+
+## 제6조. 커밋 기록표
+
+| 번호 | 유형 | 변경 내용 | 상태 |
+|---|---|---|---|
+| 001 | INIT | V1.0.0-beta GitHub 최초 업로드 | 예정 |
+
+### 개별 커밋 상세 기록 양식
+
+**커밋 번호:** 001  
+**버전:** V1.0.0-beta  
+**유형:** INIT  
+**제목:** GitHub 최초 업로드  
+**작성 일자:** 미정  
+**Git 커밋 해시:** 미정  
+**변경 사항:** 프로젝트 최초 등록  
+**테스트 결과:** 미기록  
+**GitHub 업로드:** 예정  
+**특이 사항:** 최초 커밋
+
+---
+
+## 제7조. 기록 수정 및 관리
+
+1. GitHub 업로드 완료 후 커밋 번호, 메시지, 해시를 기록한다.
+2. 기존 커밋 기록은 원칙적으로 삭제하지 않는다.
+3. 잘못된 기록을 발견한 경우 수정 사유를 남긴다.
+4. 커밋 기록표에 없는 공식 커밋이 발견되면 누락된 기록을 보완한다.
+5. 기록표는 프로젝트 개발 이력을 확인할 수 있도록 지속적으로 유지한다.
+
+---
+
+**규칙 시행 기준:** V1.0.0-beta 최초 GitHub 업로드  
+**최초 공식 커밋:** `001`
+
+---
+
+## 기록:
+
+### 2026-10-15 19/00/00
+#### 001. github 업로드 
+##### 062954dce2b3acc1a4c93bda0b364c3037717c11
+**ㄴ** 001-1.문서 형식 수정 (해시)
