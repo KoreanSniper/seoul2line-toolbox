@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+from pathlib import Path
 import shutil
 import subprocess
 import time
@@ -31,12 +32,16 @@ class SystemMonitor(tk.Frame):
         self.app = app
         self.labels: dict[str, tk.Label] = {}
         self.running = True
+        self._refresh_job: str | None = None
         self.last_net: tuple[int, int, float] | None = None
         self._build()
         self.refresh()
 
     def destroy(self) -> None:
         self.running = False
+        if self._refresh_job is not None:
+            self.after_cancel(self._refresh_job)
+            self._refresh_job = None
         super().destroy()
 
     def _build(self) -> None:
@@ -61,10 +66,13 @@ class SystemMonitor(tk.Frame):
     def refresh(self) -> None:
         if not self.running:
             return
+        if self._refresh_job is not None:
+            self.after_cancel(self._refresh_job)
+            self._refresh_job = None
         data = self.snapshot()
         for key, value in data.items():
             self.labels[key].configure(text=value)
-        self.after(2500, self.refresh)
+        self._refresh_job = self.after(2500, self.refresh)
 
     def snapshot(self) -> dict[str, str]:
         memory = MEMORYSTATUSEX()
@@ -72,14 +80,18 @@ class SystemMonitor(tk.Frame):
         ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(memory))
         used = (memory.ullTotalPhys - memory.ullAvailPhys) / 1024 / 1024 / 1024
         total = memory.ullTotalPhys / 1024 / 1024 / 1024
-        disk = shutil.disk_usage(Path.cwd().anchor or ".")
+        try:
+            disk = shutil.disk_usage(Path.cwd().anchor or ".")
+            disk_text = f"{disk.used / disk.total * 100:.0f}%  {disk.free / 1024 / 1024 / 1024:.0f} GB 여유" if disk.total else "확인 불가"
+        except OSError:
+            disk_text = "확인 불가"
         gpu, vram = self.gpu_snapshot()
         return {
             "CPU": self.cpu_snapshot(),
             "RAM": f"{memory.dwMemoryLoad}%  {used:.1f}/{total:.1f} GB",
             "GPU": gpu,
             "VRAM": vram,
-            "디스크": f"{disk.used / disk.total * 100:.0f}%  {disk.free / 1024 / 1024 / 1024:.0f} GB 여유",
+            "디스크": disk_text,
             "네트워크": self.net_snapshot(),
         }
 
@@ -92,6 +104,7 @@ class SystemMonitor(tk.Frame):
                 encoding="utf-8",
                 errors="replace",
                 timeout=1.8,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             for line in result.stdout.splitlines():
                 if line.startswith("LoadPercentage="):
@@ -109,6 +122,7 @@ class SystemMonitor(tk.Frame):
                 encoding="utf-8",
                 errors="replace",
                 timeout=1.8,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             first = result.stdout.splitlines()[0]
             util, used, total = [part.strip() for part in first.split(",")]
@@ -125,6 +139,7 @@ class SystemMonitor(tk.Frame):
                 encoding="utf-8",
                 errors="replace",
                 timeout=1.8,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             numbers = [int(token) for token in result.stdout.replace(",", "").split() if token.isdigit()]
             if len(numbers) >= 2:

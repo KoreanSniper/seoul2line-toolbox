@@ -12,11 +12,27 @@ def run(report_path: str) -> int:
         from app.main_window import Seoul2LineToolbox
         from app.config import APP_DIR
         from app.version import VERSION
+        from app.tools.system_monitor import SystemMonitor
         app = Seoul2LineToolbox()
         app.withdraw()
         app.updater.close()
         app.show_section("설정")
         app.update_idletasks()
+        monitor = next(tool for tool in app.registry.tools_for("홈") if tool.id == "home.system_monitor")
+        app.show_tool(monitor)
+        app.update_idletasks()
+        assert app.current_tool_id == "home.system_monitor"
+        def descendants(widget):
+            for child in widget.winfo_children():
+                yield child
+                yield from descendants(child)
+        monitor_view = next(widget for widget in descendants(app.workspace) if isinstance(widget, SystemMonitor))
+        assert monitor_view._refresh_job is not None
+        assert all(label.cget("text") != "-" for label in monitor_view.labels.values() if label is not monitor_view.labels["VRAM"])
+        monitor_view.refresh()
+        app.show_section("설정")
+        app.update_idletasks()
+        assert not monitor_view.winfo_exists()
         tools = [tool.id for section in app.registry.sections() for tool in app.registry.tools_for(section)]
         assert "minigame.micro_warfare" in tools and "minigame.orbit_lab" in tools
         assert not [plugin.error for plugin in app.plugin_manager.plugins if plugin.error]
@@ -24,7 +40,7 @@ def run(report_path: str) -> int:
             assert (Path(sys._MEIPASS) / "updater/install_update.ps1").is_file()
             assert {plugin.id for plugin in app.plugin_manager.plugins} >= {"developer_tools", "example_plugin"}
         report.update(ok=True, version=VERSION, tool_count=len(tools), data_directory=str(APP_DIR),
-                      plugins=[plugin.id for plugin in app.plugin_manager.plugins])
+                      plugins=[plugin.id for plugin in app.plugin_manager.plugins], checked_tools=["settings.preferences", "home.system_monitor"])
     except Exception:
         report["error"] = traceback.format_exc()
     finally:
