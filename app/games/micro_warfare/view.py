@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import tkinter as tk
 import time
+from pathlib import Path
+from tkinter import filedialog, messagebox
 
-from app.games.micro_warfare.model import BUILDING_SPECS, UNIT_SPECS, Camera, TERRAIN_COLORS, TILE_SIZE, WarfareGame
+from app.config import APP_DIR
+from app.games.micro_warfare.model import BUILDING_SPECS, GAME_MODES, UNIT_SPECS, Camera, TERRAIN_COLORS, TILE_SIZE, WarfareGame
+from app.games.micro_warfare.storage import load_game, save_game
 from app.palette import palette
-from app.ui import RoundedButton
+from app.ui import RoundedButton, styled_scrollbar
 
 
 class MicroWarfareView(tk.Frame):
@@ -25,25 +29,45 @@ class MicroWarfareView(tk.Frame):
         header = tk.Frame(self, bg=colors["panel"])
         header.pack(fill="x", padx=14, pady=10)
         tk.Label(header, text="Micro Warfare", bg=colors["panel"], fg=colors["text"],
-                 font=("Segoe UI", 19, "bold")).pack(side="left")
-        RoundedButton(header, "새 전장", self.new_world, colors, compact=True).pack(side="right")
-        RoundedButton(header, "자원 반납", self.deposit, colors, compact=True).pack(side="right", padx=8)
+                 font=("Segoe UI", 19, "bold")).pack(anchor="w")
+        controls = tk.Frame(header, bg=colors["panel"])
+        controls.pack(fill="x", pady=(6, 0))
+        RoundedButton(controls, "새 전장", self.new_world, colors, compact=True).pack(side="left")
+        self.mode_choice = tk.StringVar(value=GAME_MODES[self.game.mode])
+        mode_menu = tk.OptionMenu(controls, self.mode_choice, *GAME_MODES.values())
+        mode_menu.configure(bg=colors["field"], fg=colors["text"], highlightthickness=0, relief="flat")
+        mode_menu.pack(side="left", padx=8)
+        RoundedButton(controls, "일시정지/계속", self.toggle_pause, colors, compact=True).pack(side="left")
+        RoundedButton(controls, "자원 반납", self.deposit, colors, compact=True).pack(side="left", padx=8)
         actions = tk.Frame(self, bg=colors["panel"])
         actions.pack(fill="x", padx=14)
-        for kind in ("barracks", "warehouse"):
+        actions.columnconfigure(0, weight=1)
+        actions.columnconfigure(1, weight=1)
+        for index, kind in enumerate(("barracks", "warehouse")):
             spec = BUILDING_SPECS[kind]
             RoundedButton(actions, f"{spec['name']} 건설 ({spec['ore']}/{spec['wood']})",
-                          lambda kind=kind: self.start_build(kind), colors, compact=True).pack(side="left", padx=(0, 8))
-        RoundedButton(actions, "업그레이드 (80/60 × Lv.)", self.upgrade, colors, compact=True).pack(side="left", padx=(0, 8))
-        RoundedButton(actions, "건설 재개", self.resume_build, colors, compact=True).pack(side="left")
+                          lambda kind=kind: self.start_build(kind), colors, compact=True).grid(row=0, column=index, sticky="ew", padx=(0, 8), pady=2)
+        RoundedButton(actions, "업그레이드 (80/60 × Lv.)", self.upgrade, colors, compact=True).grid(row=1, column=0, sticky="ew", padx=(0, 8), pady=2)
+        RoundedButton(actions, "건설 재개", self.resume_build, colors, compact=True).grid(row=1, column=1, sticky="ew", padx=(0, 8), pady=2)
         self.status = tk.StringVar()
-        tk.Label(self, textvariable=self.status, bg=colors["panel"], fg=colors["muted"], anchor="w").pack(fill="x", padx=14)
+        self.status_label = tk.Label(self, textvariable=self.status, bg=colors["panel"], fg=colors["muted"], anchor="w", justify="left", wraplength=640)
+        self.status_label.pack(fill="x", padx=14)
+        self.bind("<Configure>", lambda event: self.status_label.configure(wraplength=max(200, event.width - 28)) if event.widget is self else None)
         body = tk.Frame(self, bg=colors["panel"])
         body.pack(fill="both", expand=True, padx=14, pady=8)
         self.canvas = tk.Canvas(body, bg="#111e1d", highlightthickness=0, takefocus=True)
         self.canvas.pack(side="left", fill="both", expand=True)
-        panel = tk.Frame(body, bg=colors["panel_soft"], width=220)
-        panel.pack(side="right", fill="y", padx=(10, 0))
+        sidebar = tk.Frame(body, bg=colors["panel_soft"])
+        sidebar.pack(side="right", fill="y", padx=(10, 0))
+        side_canvas = tk.Canvas(sidebar, bg=colors["panel_soft"], width=220, highlightthickness=0)
+        side_scroll = styled_scrollbar(sidebar, "vertical", side_canvas.yview, colors)
+        side_scroll.pack(side="right", fill="y")
+        side_canvas.pack(side="left", fill="both", expand=True)
+        side_canvas.configure(yscrollcommand=side_scroll.set)
+        panel = tk.Frame(side_canvas, bg=colors["panel_soft"])
+        panel_window = side_canvas.create_window(0, 0, window=panel, anchor="nw")
+        panel.bind("<Configure>", lambda _event: side_canvas.configure(scrollregion=side_canvas.bbox("all")))
+        side_canvas.bind("<Configure>", lambda event: side_canvas.itemconfigure(panel_window, width=event.width))
         self.selection_info = tk.StringVar(value="유닛 또는 건물을 선택하세요.")
         tk.Label(panel, textvariable=self.selection_info, bg=colors["panel_soft"], fg=colors["text"],
                  justify="left", wraplength=210, anchor="nw").pack(fill="x", padx=8, pady=10)
@@ -55,7 +79,12 @@ class MicroWarfareView(tk.Frame):
                                     selectbackground=colors["accent"], exportselection=False, relief="flat")
         self.queue_list.pack(fill="x", padx=8)
         RoundedButton(panel, "선택 생산 취소 · 환불", self.cancel_production, colors, compact=True).pack(fill="x", padx=8, pady=8)
-        tk.Label(self, text="좌클릭/드래그: 선택 · Shift: 추가 선택 · 우클릭: 이동/자원 채굴 · WASD/방향키/가운데 드래그: 카메라 · 휠: 확대",
+        RoundedButton(panel, "게임 저장", self.save_current, colors, compact=True).pack(fill="x", padx=8, pady=4)
+        RoundedButton(panel, "게임 불러오기", self.load_current, colors, compact=True).pack(fill="x", padx=8, pady=4)
+        self.statistics_text = tk.StringVar()
+        tk.Label(panel, textvariable=self.statistics_text, bg=colors["panel_soft"], fg=colors["muted"],
+                 justify="left", anchor="nw").pack(fill="x", padx=8, pady=10)
+        tk.Label(self, text="좌클릭/드래그: 선택 · Shift: 추가 · 우클릭: 이동/채굴/적 공격 · WASD/방향키/가운데 드래그: 카메라 · 휠: 확대",
                  bg=colors["panel"], fg=colors["muted"], anchor="w").pack(fill="x", padx=14, pady=(0, 8))
         self.canvas.bind("<Configure>", self.resize)
         self.canvas.bind("<ButtonPress-1>", self.select_start)
@@ -73,11 +102,56 @@ class MicroWarfareView(tk.Frame):
         self.tick_id = self.after(33, self.tick)
 
     def new_world(self) -> None:
-        self.game = WarfareGame(self.world.seed + 1)
+        mode = next(key for key, label in GAME_MODES.items() if label == self.mode_choice.get())
+        self.game = WarfareGame(self.world.seed + 1, mode=mode)
         self.world = self.game.world
         self.selection_start = self.selection_end = None
         self.build_kind = None
         self.camera.x = self.camera.y = 0
+        self.draw()
+
+    def toggle_pause(self) -> None:
+        if self.game.result == "running":
+            self.game.paused = not self.game.paused
+        self.draw()
+
+    def save_current(self) -> None:
+        directory = APP_DIR / "micro_warfare"
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            messagebox.showerror("게임 저장 실패", str(exc), parent=self)
+            return
+        selected = filedialog.asksaveasfilename(parent=self, title="Micro Warfare 저장", initialdir=directory,
+                                               initialfile="battle.json", defaultextension=".json", filetypes=[("JSON 저장 파일", "*.json")])
+        if not selected:
+            return
+        try:
+            save_game(self.game, Path(selected))
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("게임 저장 실패", str(exc), parent=self)
+            return
+        self.game.notice = "게임을 저장했습니다."
+        self.draw()
+
+    def load_current(self) -> None:
+        selected = filedialog.askopenfilename(parent=self, title="Micro Warfare 불러오기", initialdir=APP_DIR / "micro_warfare",
+                                              filetypes=[("JSON 저장 파일", "*.json")])
+        if not selected:
+            return
+        try:
+            loaded = load_game(Path(selected))
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("게임 불러오기 실패", str(exc), parent=self)
+            return
+        self.game, self.world = loaded, loaded.world
+        self.camera = Camera(self.world.pixel_width, self.world.pixel_height,
+                             width=self.canvas.winfo_width(), height=self.canvas.winfo_height())
+        self.build_kind = None
+        self.selection_start = self.selection_end = None
+        self.mode_choice.set(GAME_MODES[loaded.mode])
+        self.last_tick = time.perf_counter()
+        self.game.notice = "저장한 게임을 불러왔습니다."
         self.draw()
 
     def close(self, event: tk.Event) -> None:
@@ -122,7 +196,10 @@ class MicroWarfareView(tk.Frame):
             return
         x, y = self.camera.to_world(event.x, event.y)
         node = self.game.resource_at(x, y)
-        if node:
+        enemy = self.game.enemy_at(x, y)
+        if enemy:
+            self.game.issue_attack(enemy)
+        elif node:
             self.game.issue_harvest(node)
         else:
             self.game.issue_move(x, y)
@@ -215,6 +292,9 @@ class MicroWarfareView(tk.Frame):
             elif building.upgrade_remaining:
                 label += f"\n강화 {building.upgrade_remaining:.1f}초"
             self.canvas.create_text(sx + width / 2, sy + width / 2, text=label, fill="white", font=("Segoe UI", 8))
+            max_hp = 1000 if building.kind == "hq" else 500
+            self.canvas.create_rectangle(sx, sy - 6, sx + width, sy - 2, fill="#262a2d", outline="")
+            self.canvas.create_rectangle(sx, sy - 6, sx + width * building.hp / max_hp, sy - 2, fill="#8aefb5", outline="")
         for node in self.game.resources:
             sx, sy = self.camera.to_screen(node.x, node.y)
             radius = 14 * self.camera.zoom
@@ -228,11 +308,19 @@ class MicroWarfareView(tk.Frame):
                                     fill="#60bfff" if unit.owner == 0 else "#f36a73",
                                     outline="#f8e686" if unit.id in self.game.selected_ids else "#102c35", width=2)
             self.canvas.create_text(sx, sy, text="W" if unit.role == "worker" else "S", fill="#10202c", font=("Segoe UI", 8, "bold"))
+            self.canvas.create_rectangle(sx - radius, sy + radius + 3, sx + radius, sy + radius + 6, fill="#151e24", outline="")
+            self.canvas.create_rectangle(sx - radius, sy + radius + 3,
+                                         sx - radius + 2 * radius * unit.hp / UNIT_SPECS[unit.role]['hp'], sy + radius + 6, fill="#8aefb5", outline="")
             if unit.cargo:
                 self.canvas.create_text(sx, sy - radius - 8, text=f"{unit.cargo:.0f}/20", fill="#f8e686", font=("Segoe UI", 8))
             if unit.id in self.game.selected_ids and unit.target:
                 tx, ty = self.camera.to_screen(*unit.target)
                 self.canvas.create_line(sx, sy, tx, ty, fill="#f8e686", dash=(3, 4))
+            if unit.id in self.game.selected_ids and unit.attack_target:
+                target = self.game.resolve_target(unit.attack_target)
+                if target:
+                    tx, ty = self.camera.to_screen(*self.game.target_position(target))
+                    self.canvas.create_line(sx, sy, tx, ty, fill="#ff8080", dash=(2, 4))
         if self.selection_start is not None and self.selection_end is not None:
             self.canvas.create_rectangle(*self.camera.to_screen(*self.selection_start),
                                          *self.camera.to_screen(*self.selection_end), outline="#f8e686", dash=(4, 2))
@@ -245,6 +333,12 @@ class MicroWarfareView(tk.Frame):
         self.status.set(f"광석 {self.game.stock['ore']:.0f} · 목재 {self.game.stock['wood']:.0f} · "
                         f"보관 {sum(self.game.stock.values()):.0f}/{self.game.storage_capacity:.0f} · "
                         f"인구(예약 포함) {self.game.population_reserved}/{self.game.population_limit} · {self.game.notice}")
+        banner = ("일시정지" if self.game.paused else "") if self.game.result == "running" else {"victory": "승리", "defeat": "패배", "draw": "무승부"}[self.game.result]
+        if banner:
+            cx, cy = self.camera.width / 2, self.camera.height / 2
+            self.canvas.create_rectangle(cx - 170, cy - 50, cx + 170, cy + 50, fill="#152831", outline="#f8e686")
+            self.canvas.create_text(cx, cy - 10, text=banner, fill="#f8e686", font=("Segoe UI", 24, "bold"))
+            self.canvas.create_text(cx, cy + 25, text=GAME_MODES[self.game.mode], fill="white")
         building = next((item for item in self.game.buildings if item.id == self.game.selected_building), None)
         entries = []
         if building:
@@ -264,5 +358,11 @@ class MicroWarfareView(tk.Frame):
                 self.queue_list.insert("end", entry)
             if selected and selected[0] < len(entries):
                 self.queue_list.selection_set(selected[0])
+        stats = self.game.statistics[0]
+        self.statistics_text.set(f"{GAME_MODES[self.game.mode]} · {self.game.elapsed:.0f}초\n"
+                                 f"생산 {stats['units_produced']:.0f} / 전사 {stats['units_lost']:.0f}\n"
+                                 f"처치 {stats['kills']:.0f} / 건물 파괴 {stats['buildings_destroyed']:.0f}\n"
+                                 f"피해량 {stats['damage_dealt']:.0f}\n"
+                                 f"채집 광석 {stats['gathered_ore']:.0f}\n채집 목재 {stats['gathered_wood']:.0f}")
         self.canvas.create_text(12, 12, anchor="nw", fill="#d4e9dc", font=("Segoe UI", 9),
                                 text="초원 · 숲 · 물 · 바위")

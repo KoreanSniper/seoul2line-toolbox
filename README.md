@@ -74,7 +74,7 @@ GitHub에 올린 뒤 `v1.0.0` 같은 태그를 push하면 GitHub Actions가 PyIn
 - GPU 항성계 시뮬레이터
 - TRSim
 - 공장 자동화
-- Micro Warfare: 2D 전장, 다중 유닛 선택·이동, 광석·목재 채굴, 기지 건설·강화, 유닛 생산 대기열
+- Micro Warfare: 2D RTS 전장, A* 이동, 채굴·건설·생산, 자동 교전과 적 경제·전략 AI, 3가지 게임 모드, 저장·불러오기 및 전투 통계
 - 한국 주식
 
 ### 설정
