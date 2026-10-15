@@ -19,6 +19,7 @@ from app.economy import add_coins, balance, format_coins, spend_coins
 from app.palette import palette
 from app.tool_registry import ToolSpec
 from app.ui import RoundedButton, RoundedFrame
+from app.config import APP_DIR
 
 
 # 한글 폰트 설정 (윈도우 기준)
@@ -26,7 +27,7 @@ matplotlib.rcParams['font.family'] = 'Malgun Gothic'
 matplotlib.rcParams['axes.unicode_minus'] = False
 STATE_KEY = "korean_stock_game"
 MARKET_PRICE_SCALE = 100
-STOCKS_DB_PATH = Path(__file__).resolve().parents[2] / "user_data" / "stocks.db"
+STOCKS_DB_PATH = APP_DIR / "stocks.db"
 OFFLINE_CATCHUP_LIMIT = 500
 
 

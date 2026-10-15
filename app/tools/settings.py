@@ -148,7 +148,7 @@ def build(parent: tk.Widget, app: object) -> tk.Widget:
             "플러그인은 앱과 같은 권한으로 Python 코드를 실행합니다.\n"
             "악성 코드는 파일을 읽거나 삭제하고 네트워크에 접근할 수 있습니다.\n\n"
             "신뢰할 수 있는 출처의 파일인지 확인하세요.\n"
-            "계속하면 압축을 풀어 user_data/plugins에 설치하고 즉시 불러옵니다.\n\n"
+            f"계속하면 압축을 풀어 다음 폴더에 설치하고 즉시 불러옵니다.\n{app.plugin_manager.roots[1]}\n\n"
             "이 플러그인을 설치하시겠습니까?",
             parent=frame, icon="warning", default=messagebox.NO,
         ):
@@ -185,6 +185,15 @@ def build(parent: tk.Widget, app: object) -> tk.Widget:
         wraplength=760,
         justify="left",
     ).grid(row=4, column=0, columnspan=2, sticky="w")
+    update_card = card(content, colors, "앱 업데이트", "GitHub 정식 릴리스의 설치본을 확인합니다.")
+    update_card.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+    automatic = tk.BooleanVar(value=app.config_store.get("updates", "automatic", default=True))
+    tk.Checkbutton(update_card.body, text="시작 시 자동 업데이트 확인 (설치본)", variable=automatic,
+                   command=lambda: app.config_store.set("updates", "automatic", value=automatic.get()),
+                   bg=colors["panel_soft"], fg=colors["text"], selectcolor=colors["field"],
+                   activebackground=colors["panel_soft"], activeforeground=colors["text"]).pack(anchor="w", pady=8)
+    RoundedButton(update_card.body, "업데이트 확인", app.updater.check, colors, compact=True).pack(anchor="w")
+    tk.Label(update_card.body, textvariable=app.updater.status, bg=colors["panel_soft"], fg=colors["muted"], wraplength=650, justify="left").pack(anchor="w", pady=8)
     return frame
 
 

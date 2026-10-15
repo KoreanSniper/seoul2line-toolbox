@@ -13,6 +13,7 @@ from typing import Any
 import zipfile
 
 from app.tool_registry import MenuSpec, SectionSpec, ToolRegistry, ToolSpec
+from app.paths import application_root, data_directory
 
 
 PLUGIN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
@@ -55,8 +56,9 @@ class PluginRegistry:
 
 class PluginManager:
     def __init__(self, config_store: Any, project_root: Path | None = None) -> None:
-        root = project_root or Path(__file__).resolve().parents[1]
-        self.roots = (root / "plugins", root / "user_data" / "plugins")
+        root = project_root or application_root()
+        user_root = root / "user_data" if project_root is not None else data_directory()
+        self.roots = (root / "plugins", user_root / "plugins")
         self.config_store = config_store
         self.plugins: list[PluginInfo] = []
 

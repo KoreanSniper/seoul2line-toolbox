@@ -17,6 +17,8 @@ from app.tools.minigame_korean_stocks import StockPriceEngine
 from app.ui import RoundedButton, RoundedFrame, rounded_rect
 from app.palette import palette
 from app.plugin_system import PluginManager
+from app.update_ui import UpdateController
+from app.version import VERSION
 
 SECTION_DESCRIPTIONS = {
     "홈": "전체 도구 개요와 빠른 시작",
@@ -49,7 +51,7 @@ class PaletteCommand:
 class Seoul2LineToolbox(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("seoul2line Toolbox")
+        self.title(f"seoul2line Toolbox {VERSION}")
         self.geometry("1280x760")
         self.minsize(980, 620)
 
@@ -94,6 +96,7 @@ class Seoul2LineToolbox(tk.Tk):
         self.screenshot_manager.start()
         self.show_section("홈")
         self._watch_source_files()
+        self.updater = UpdateController(self)
 
     
 
@@ -535,6 +538,7 @@ class Seoul2LineToolbox(tk.Tk):
         self.gpt_help_label.configure(wraplength=width)
 
     def _close_app(self) -> None:
+        self.updater.close()
         self.after_cancel(self._automation_job)
         self.automation.close()
         if self._reload_job is not None:
@@ -588,6 +592,8 @@ class Seoul2LineToolbox(tk.Tk):
         return tuple(signature)
 
     def _watch_source_files(self) -> None:
+        if getattr(sys, "frozen", False):
+            return
         current = self._source_signature()
         if current != self._source_snapshot and self._reload_candidate is None:
             # 저장 중인 파일을 반쯤 읽어 재시작하지 않도록 잠시 안정화 시간을 둔다.
@@ -776,5 +782,9 @@ class Seoul2LineToolbox(tk.Tk):
 
 
 def main() -> None:
+    from app.single_instance import acquire_installed_instance
+    if not acquire_installed_instance():
+        messagebox.showinfo("seoul2line Toolbox", "앱이 이미 실행 중입니다.")
+        return
     app = Seoul2LineToolbox()
     app.mainloop()

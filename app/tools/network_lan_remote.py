@@ -12,10 +12,11 @@ from tkinter import filedialog
 from app.palette import palette
 from app.tool_registry import ToolSpec
 from app.ui import RoundedButton, RoundedFrame
+from app.config import APP_DIR
 
 
 PORT_DEFAULT = 5000
-SAVE_DIR = Path(__file__).resolve().parents[2] / "user_data" / "received"
+SAVE_DIR = APP_DIR / "received"
 
 
 def send_packet(sock: socket.socket, data: bytes) -> None:

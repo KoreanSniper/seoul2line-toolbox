@@ -10,6 +10,7 @@ from pathlib import Path
 import tkinter as tk
 
 from PIL import Image, ImageGrab, ImageTk
+from app.paths import data_directory
 
 
 VK_SNAPSHOT = 0x2C
@@ -191,7 +192,7 @@ def format_geometry(width: int, height: int, x: int, y: int) -> str:
 
 
 def screenshot_dir() -> Path:
-    path = Path(__file__).resolve().parents[1] / "user_data" / "screenshots"
+    path = data_directory() / "screenshots"
     path.mkdir(parents=True, exist_ok=True)
     return path
 

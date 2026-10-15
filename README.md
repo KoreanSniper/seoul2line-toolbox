@@ -21,13 +21,20 @@ py main.py
 
 ## Windows 설치 파일 만들기
 
-로컬에서 Inno Setup 설치 후 다음 명령을 실행하면 `release/seoul2line-toolbox-setup.exe`가 생성됩니다.
+일반 사용자는 [최신 설치 프로그램](https://github.com/KoreanSniper/seoul2line-toolbox/releases/latest)에서 EXE를 받으면 됩니다. Python 설치는 필요하지 않습니다. `update_installer.bat`도 최신 정식 릴리스를 받아 SHA-256·크기를 검증한 뒤 설치 화면을 엽니다.
+
+소스에서 빌드하려면 Python 3.11 이상과 Inno Setup 6을 설치하고 다음 명령을 실행합니다. `release/seoul2line-toolbox-setup.exe`와 검증용 `release/update.json`이 생성됩니다.
 
 ```powershell
-pwsh -ExecutionPolicy Bypass -File installer\build.ps1
+powershell -ExecutionPolicy Bypass -File installer\build.ps1 -InstallDependencies
+# 또는 update_installer.bat --build
 ```
 
-GitHub에 올린 뒤 `v1.0.0` 같은 태그를 push하면 GitHub Actions가 PyInstaller로 실행 파일을 만들고 Inno Setup 설치 파일을 Release에 자동으로 첨부합니다. 수동 실행은 Actions의 `Windows installer` 워크플로에서 가능합니다.
+버전은 `app/version.py`의 `VERSION`에서 관리합니다. 해당 버전과 같은 `v2.0.1` 형식의 태그를 push하면 GitHub Actions가 빌드하고 실행 파일의 화면·메뉴·기본 플러그인 로딩을 검사한 뒤 설치 EXE와 `update.json`을 정식 Release에 게시합니다. Actions에서 수동 실행하면 배포 전 검토용 artifact만 생성됩니다.
+
+설치본은 시작 시와 실행 중 6시간마다 새 버전을 백그라운드에서 확인합니다. 설치 확인을 누르면 다운로드·체크섬 검증 후 앱을 종료하고 같은 폴더에 업데이트한 뒤 다시 실행합니다. 설정에서 자동 확인을 끄거나 수동으로 확인할 수 있습니다. 소스 실행에서는 설치본으로 자동 교체하지 않습니다.
+
+설치본의 사용자 설정·게임 저장·사용자 플러그인·업데이트 로그는 `%LOCALAPPDATA%\seoul2line Toolbox\user_data`에 보관되므로 앱을 덮어써도 유지됩니다. 기존 설치 폴더의 `user_data`는 최초 실행 시 기존 파일을 덮어쓰지 않고 복사합니다. 소스 실행은 프로젝트의 `user_data`를 사용합니다. 업데이트 실패 로그는 사용자 데이터의 `updates/install-update.log`에서 확인할 수 있습니다.
 
 처음 실행하면 `user_data` 폴더와 설정 파일이 생성될 수 있습니다. 외부 프로그램 실행·파일 삭제·네트워크 기능은 사용자가 입력한 경로와 권한의 영향을 받습니다.
 

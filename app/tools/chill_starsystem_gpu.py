@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 import os
 import json
-import app as app_package
 import random
 import subprocess
 import sys
@@ -17,11 +16,15 @@ from app.tool_registry import ToolSpec
 from app.games.starsystem.renderer import ShaderProgram, ShaderSourceError
 from app.ui import RoundedButton, RoundedFrame
 from app.palette import palette
+from app.config import CONFIG_PATH
+from app.paths import application_root
 
-APP_DIR = Path(app_package.__file__).resolve().parent
-CONFIG_PATH = APP_DIR.parent / "user_data" / "config.json"
-with CONFIG_PATH.open("r",encoding="utf-8") as f:
-    config = json.load(f)
+try:
+    config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    if not isinstance(config, dict):
+        config = {}
+except (OSError, UnicodeError, json.JSONDecodeError):
+    config = {}
 
 theme = config.get("theme","dark")
 dark_mode:bool = (theme == "dark")
@@ -190,9 +193,10 @@ class GpuStarSystemLauncher(tk.Frame):
             self.launch()
             return
         try:
-            project_root = Path(__file__).resolve().parents[2]
+            project_root = application_root()
             # 버튼 콜백에서 별도 Python 프로세스를 실행해 메인 Tkinter 창을 멈추지 않는다.
-            self.process = subprocess.Popen([sys.executable, "-m", "app.tools.chill_starsystem_gpu", "--run"], cwd=project_root)
+            command = [sys.executable, "--run-gpu-stars"] if getattr(sys, "frozen", False) else [sys.executable, "-m", "app.tools.chill_starsystem_gpu", "--run"]
+            self.process = subprocess.Popen(command, cwd=project_root)
         except OSError as exc:
             messagebox.showerror("GPU 항성계", f"GPU 창을 열 수 없습니다.\n{exc}")
             return

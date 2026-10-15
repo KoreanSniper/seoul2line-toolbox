@@ -7,9 +7,10 @@ from pathlib import Path
 from app.palette import palette
 from app.tool_registry import ToolSpec
 from app.ui import RoundedButton, RoundedFrame
+from app.config import APP_DIR
 
 
-DATA_PATH = Path(__file__).resolve().parents[3] / "user_data" / "scratchpad.json"
+DATA_PATH = APP_DIR / "scratchpad.json"
 
 
 class Scratchpad(tk.Frame):

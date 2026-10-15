@@ -10,8 +10,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from app.paths import data_directory, migrate_legacy_data
 
-APP_DIR = Path(__file__).resolve().parents[1] / "user_data"
+
+APP_DIR = data_directory()
 CONFIG_PATH = APP_DIR / "config.json"
 
 VALID_THEMES = {"dark", "light"}
@@ -85,6 +87,7 @@ class AppConfig:
 
     @classmethod
     def load(cls) -> "AppConfig":
+        migrate_legacy_data(APP_DIR)
         APP_DIR.mkdir(parents=True, exist_ok=True)
         if not CONFIG_PATH.exists():
             cfg = cls()
