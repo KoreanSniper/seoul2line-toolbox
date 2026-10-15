@@ -1,0 +1,6 @@
+{
+  "id": "example_plugin",
+  "name": "플러그인 예제",
+  "version": "1.0.0",
+  "entrypoint": "plugin.py"
+}

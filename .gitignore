@@ -1,0 +1,38 @@
+# Runtime and personal data
+user_data/*
+!user_data/.gitkeep
+archives/
+
+# Local manual test data (photos and machine-specific workflow paths)
+tests/bf_img/
+tests/af_img/
+tests/test.workflow.json
+
+# Local credentials, agent settings and editor settings
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.aws/
+.codex/
+.agents/
+.idea/
+.vscode/
+
+# Python cache and local environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# Build outputs
+build/
+dist/
+release/
+*.spec
+
+# Temporary installer/build logs
+installer/*.log

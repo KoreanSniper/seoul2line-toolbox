@@ -1,0 +1,6 @@
+{
+  "id": "developer_tools",
+  "name": "Developer 도구",
+  "version": "1.0.0",
+  "entrypoint": "plugin.py"
+}
