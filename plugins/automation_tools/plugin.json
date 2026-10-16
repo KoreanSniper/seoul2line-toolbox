@@ -1,0 +1,6 @@
+{
+  "id": "automation_tools",
+  "name": "자동화 도구",
+  "version": "1.0.0",
+  "entrypoint": "plugin.py"
+}

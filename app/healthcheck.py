@@ -47,7 +47,11 @@ def run(report_path: str) -> int:
         assert not [plugin.error for plugin in app.plugin_manager.plugins if plugin.error]
         if getattr(sys, "frozen", False):
             assert (Path(sys._MEIPASS) / "updater/install_update.ps1").is_file()
-            assert {plugin.id for plugin in app.plugin_manager.plugins} >= {"developer_tools", "example_plugin"}
+            assert {plugin.id for plugin in app.plugin_manager.plugins} >= {"developer_tools", "automation_tools", "example_plugin"}
+            automation_tools = app.registry.tools_for('자동화')
+            assert {tool.id for tool in automation_tools} == {
+                'automation.editor', 'automation.history', 'automation.manager'}
+            assert all(tool.plugin_id == 'automation_tools' for tool in automation_tools)
         report.update(ok=True, version=VERSION, tool_count=len(tools), data_directory=str(APP_DIR),
                       plugins=[plugin.id for plugin in app.plugin_manager.plugins], checked_tools=["settings.preferences", "home.system_monitor", "minigame.trsim"])
     except Exception:

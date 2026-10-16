@@ -31,7 +31,7 @@ try {
         '--add-data', 'app/games/starsystem/renderer/shaders;app/games/starsystem/renderer/shaders', '--collect-submodules', 'app',
         '--hidden-import', 'uuid', '--hidden-import', 'keyword', 'main.py')
     if (-not (Test-Path -LiteralPath 'dist/seoul2line Toolbox/seoul2line Toolbox.exe')) { throw 'PyInstaller output missing.' }
-    foreach ($pluginName in @('developer_tools', 'example_plugin')) {
+    foreach ($pluginName in @('developer_tools', 'automation_tools', 'example_plugin')) {
         $pluginSource = Join-Path $projectRoot "plugins/$pluginName"
         foreach ($file in (Get-ChildItem -LiteralPath $pluginSource -Recurse -File)) {
             if ($file.FullName -match '[\\/]__pycache__[\\/]' -or $file.Extension -eq '.pyc') { continue }

@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 import tempfile
+from app.file_ops import retry_on_windows_lock
 
 
 def convert_image(source: Path, target: Path, target_ext: str) -> None:
@@ -18,6 +19,6 @@ def convert_image(source: Path, target: Path, target_ext: str) -> None:
             if target_ext in {"jpg", "jpeg"}:
                 image = image.convert("RGB")
             image.save(temporary, format={"jpg": "JPEG", "jpeg": "JPEG", "tif": "TIFF", "ico": "ICO"}.get(target_ext, target_ext.upper()))
-        os.replace(temporary, target)
+        retry_on_windows_lock(os.replace, temporary, target)
     finally:
         Path(temporary).unlink(missing_ok=True)

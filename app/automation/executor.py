@@ -7,6 +7,7 @@ from app.automation.graph import topological, validate
 from app.services.images import convert_image
 from app.automation.conditions import evaluate, migrate_workflow
 from app.automation.data import InputResolver, execution_signature
+from app.file_ops import retry_on_windows_lock
 
 
 class Cancelled(Exception):
@@ -128,6 +129,6 @@ def convert_copy(source, target):
     os.close(fd)
     try:
         shutil.copy2(source, temporary)
-        os.replace(temporary, target)
+        retry_on_windows_lock(os.replace, temporary, target)
     finally:
         Path(temporary).unlink(missing_ok=True)

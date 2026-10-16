@@ -97,6 +97,8 @@ powershell -ExecutionPolicy Bypass -File installer\build.ps1 -InstallDependencie
 
 ### 자동화
 
+기본 제공 `automation_tools` 플러그인(자동화 도구)에서 제공합니다. 설정 → 플러그인에서 메뉴를 켜고 끌 수 있으며 저장된 워크플로와 실행 기록은 유지됩니다. 메뉴를 꺼도 실행 중인 자동화는 계속 동작합니다.
+
 | 도구 | 주요 기능 |
 | --- | --- |
 | 워크플로 편집기 | 노드 배치·연결, 간편·고급 모드, 조건 분기, 데이터 자동 전달, 검증·테스트 실행·저장 |

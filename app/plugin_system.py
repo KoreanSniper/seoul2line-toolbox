@@ -14,6 +14,7 @@ import zipfile
 
 from app.tool_registry import MenuSpec, SectionSpec, ToolRegistry, ToolSpec
 from app.paths import application_root, data_directory
+from app.file_ops import retry_on_windows_lock
 
 
 PLUGIN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
@@ -185,7 +186,7 @@ class PluginManager:
                 if destination.exists() or destination.is_symlink():
                     raise ValueError("설치할 폴더가 이미 있습니다. 기존 파일은 덮어쓰지 않습니다.")
                 install_root.mkdir(parents=True, exist_ok=True)
-                plugin_root.rename(destination)
+                retry_on_windows_lock(plugin_root.rename, destination)
                 plugin.path = destination
                 return plugin
 

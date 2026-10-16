@@ -2,6 +2,11 @@
 user_data/*
 !user_data/.gitkeep
 archives/
+plugins/*
+!plugins/automation_tools/
+plugins/automation_tools/*
+!plugins/automation_tools/plugin.json
+!plugins/automation_tools/plugin.py
 
 # Local manual test data (photos and machine-specific workflow paths)
 tests/bf_img/
@@ -33,6 +38,7 @@ build/
 dist/
 release/
 *.spec
+
 
 # Temporary installer/build logs
 installer/*.log
