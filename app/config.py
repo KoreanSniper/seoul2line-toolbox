@@ -16,7 +16,7 @@ from app.paths import data_directory, migrate_legacy_data
 APP_DIR = data_directory()
 CONFIG_PATH = APP_DIR / "config.json"
 
-VALID_THEMES = {"dark", "light"}
+VALID_THEMES = {"dark", "light", "green"}
 DEFAULT_HOTKEYS = {
     "quick_new_file": "<Control-n>",
     "quick_delete": "<Delete>",

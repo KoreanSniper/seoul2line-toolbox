@@ -26,7 +26,7 @@ try {
     $appVersion = [regex]::Match($versionLine, '"([0-9]+\.[0-9]+\.[0-9]+)"').Groups[1].Value
     if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$appVersion") { throw 'Tag must match app/version.py.' }
     Invoke-Python @('-m', 'PyInstaller', '--noconfirm', '--clean', '--onedir', '--windowed',
-        '--name', 'seoul2line Toolbox', '--add-data', 'app/assets;app/assets',
+        '--name', 'seoul2line Toolbox', '--icon', 'app/assets/toolbox.ico', '--add-data', 'app/assets;app/assets',
         '--add-data', 'installer/install_update.ps1;updater',
         '--add-data', 'app/games/starsystem/renderer/shaders;app/games/starsystem/renderer/shaders', '--collect-submodules', 'app',
         '--hidden-import', 'uuid', '--hidden-import', 'keyword', 'main.py')

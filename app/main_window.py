@@ -9,19 +9,21 @@ from tkinter import messagebox, ttk
 from typing import Callable
 
 from app.config import APP_DIR, AppConfig
+from app.branding import apply_window_icon, configure_app_id, logo_image
 from app.automation.runtime import AutomationRuntime
 from app.economy import currency_color, ensure_daily_grant, format_coins, wallet_entries
 from app.screenshot import ScreenshotHotkeyManager
 from app.tool_registry import MenuSpec, ToolRegistry, ToolSpec, load_builtin_tools
 from app.tools.minigame_korean_stocks import StockPriceEngine
 from app.ui import RoundedButton, RoundedFrame, rounded_rect
-from app.palette import palette
+from app.palette import ThemeMode, palette
+from app.theme_art import gradient_image, icon, tool_icon
 from app.plugin_system import PluginManager
 from app.update_ui import UpdateController
 from app.version import VERSION
 
 SECTION_DESCRIPTIONS = {
-    "홈": "전체 도구 개요와 빠른 시작",
+    "홈": "도구 목록",
     "게임": "게임 실행과 버전 선택",
     "네트워크": "연결 상태와 응답 시간",
     "파일": "생성, 이동, 수정, 정리",
@@ -52,7 +54,8 @@ class Seoul2LineToolbox(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(f"seoul2line Toolbox {VERSION}")
-        self.geometry("1280x760")
+        apply_window_icon(self)
+        self.geometry("1440x860")
         self.minsize(980, 620)
 
         self.config_store = AppConfig.load()
@@ -66,15 +69,19 @@ class Seoul2LineToolbox(tk.Tk):
         self._automation_job = self.after(300, self._poll_automation)
         self.current_section = "홈"
         self.current_tool_id: str | None = None
-        self.dark_mode = self.config_store.get("theme", default="dark") == "dark"
+        self.dark_mode = ThemeMode(self.config_store.get("theme", default="dark"))
         self.section_buttons: dict[str, RoundedButton] = {}
         self.tool_buttons: dict[str, RoundedButton] = {}
         self.menu_buttons: dict[str, RoundedButton] = {}
-        self.command_palette: tk.Toplevel | None = None
+        self.command_palette: tk.Frame | None = None
         self.palette_query: tk.StringVar | None = None
         self.palette_results: tk.Frame | None = None
         self.palette_commands: list[PaletteCommand] = []
+        self.palette_selection = 0
+        self.palette_matches: list[PaletteCommand] = []
         self.gpt_panel_visible = False
+        self.tool_nav_collapsed = False
+        self.tool_nav_width = 224
         self.gpt_panel: tk.Frame | None = None
         self.gpt_prompt: tk.Text | None = None
         self.main_pane: tk.PanedWindow | None = None
@@ -92,6 +99,8 @@ class Seoul2LineToolbox(tk.Tk):
         self._build_layout()
         self.bind_all("<Control-k>", self._open_command_palette)
         self.bind_all("<Control-K>", self._open_command_palette)
+        self.bind_all("<Button-1>", self._dismiss_search_outside, add="+")
+        self.bind("<Configure>", self._resize_search, add="+")
         self.protocol("WM_DELETE_WINDOW", self._close_app)
         self.screenshot_manager.start()
         self.show_section("홈")
@@ -153,29 +162,34 @@ class Seoul2LineToolbox(tk.Tk):
         colors = palette(self.dark_mode)
         self.shell = tk.Frame(self, bg=colors["app"])
         self.shell.pack(fill="both", expand=True)
+        self._build_search_header()
+        body = tk.Frame(self.shell, bg=colors["app"])
+        body.pack(fill="both", expand=True)
 
-        self.sidebar = tk.Frame(self.shell, width=88, bg=colors["sidebar"], highlightthickness=1, highlightbackground=colors["border_soft"])
+        self.sidebar = tk.Frame(body, width=174, bg=colors["sidebar"], highlightthickness=1, highlightbackground=colors["border_soft"])
         self.sidebar.pack(side="left", fill="y")
         self.sidebar.pack_propagate(False)
 
         self.main_pane = tk.PanedWindow(
-            self.shell,
+            body,
             orient="horizontal",
             bg=colors["border_soft"],
             bd=0,
-            sashwidth=7,
+            sashwidth=1,
             sashrelief="flat",
             showhandle=False,
             opaqueresize=True,
         )
         self.main_pane.pack(side="left", fill="both", expand=True)
 
-        self.tool_nav = tk.Frame(self.main_pane, width=280, bg=colors["nav"], highlightthickness=1, highlightbackground=colors["border_soft"])
+        self.tool_nav = tk.Frame(self.main_pane, width=224, bg=colors["nav"], highlightthickness=1, highlightbackground=colors["border_soft"])
         self.tool_nav.pack_propagate(False)
 
         self.content_area = tk.Frame(self.main_pane, bg=colors["app"])
-        self.main_pane.add(self.tool_nav, minsize=210, width=280, stretch="never")
+        self.main_pane.add(self.tool_nav, minsize=200, width=224, stretch="never")
         self.main_pane.add(self.content_area, minsize=520, stretch="always")
+        if self.tool_nav_collapsed:
+            self.main_pane.forget(self.tool_nav)
 
         self.dev_pane = tk.PanedWindow(
             self.content_area,
@@ -208,8 +222,7 @@ class Seoul2LineToolbox(tk.Tk):
 
         logo = tk.Frame(self.sidebar, bg=colors["sidebar"])
         logo.pack(fill="x", pady=(16, 18))
-        tk.Label(logo, text="S2", font=("Segoe UI", 15, "bold"), fg=colors["accent"], bg=colors["sidebar"]).pack()
-        tk.Label(logo, text="Toolbox", font=("Segoe UI", 7), fg=colors["subtle"], bg=colors["sidebar"]).pack()
+        tk.Label(logo, text="도구함", font=("Malgun Gothic", 9), fg=colors["sidebar_muted"], bg=colors["sidebar"]).pack(anchor="w", padx=20)
 
         self.section_buttons.clear()
         top_canvas = tk.Canvas(self.sidebar, bg=colors["sidebar"], highlightthickness=0, bd=0)
@@ -224,23 +237,43 @@ class Seoul2LineToolbox(tk.Tk):
 
         bottom = tk.Frame(self.sidebar, bg=colors["sidebar"])
         bottom.pack(side="bottom", fill="x", pady=(8, 14))
+        self.nav_toggle = RoundedButton(
+            bottom, "도구 목록 펼치기" if self.tool_nav_collapsed else "도구 목록 접기",
+            self.toggle_tool_nav, colors, height=36,
+        )
+        self.nav_toggle.configure(height=25)
+        self.nav_toggle.height = 25
+        self.nav_toggle.pack(fill="x", padx=18, pady=(0, 8))
         self.section_buttons["설정"] = self._sidebar_button(bottom, "설정")
+
+    def toggle_tool_nav(self) -> None:
+        if self.tool_nav_collapsed:
+            self.main_pane.add(self.tool_nav, before=self.content_area, minsize=200,
+                               width=self.tool_nav_width, stretch="never")
+        else:
+            self.tool_nav_width = max(200, self.tool_nav.winfo_width())
+            self.main_pane.forget(self.tool_nav)
+        self.tool_nav_collapsed = not self.tool_nav_collapsed
+        self.nav_toggle.text = "도구 목록 펼치기" if self.tool_nav_collapsed else "도구 목록 접기"
+        self.nav_toggle._draw()
 
     def _sidebar_button(self, parent: tk.Widget, section: str) -> RoundedButton:
         colors = palette(self.dark_mode)
-        section_spec = self.registry.section_spec(section)
-        icon = section_spec.icon if section_spec else SECTION_ICONS.get(section, section[:1])
+        icon_names = {'홈': 'home', '게임': 'game', '네트워크': 'network', '파일': 'folder',
+                      '자동화': 'gear', '미니게임': 'game', '설정': 'gear', '개발자': 'monitor'}
         button = RoundedButton(
             parent,
-            text=f"{icon}\n{section}",
+            text=section,
             command=lambda: self.show_section(section),
             colors=colors,
             compact=False,
-            radius=14,
-            anchor="center",
-            height=58,
+            radius=7,
+            anchor="w",
+            height=44,
+            role='sidebar',
+            icon_name=icon_names.get(section, 'grid'),
         )
-        button.pack(fill="x", padx=10, pady=3)
+        button.pack(fill="x", padx=18, pady=4)
         return button
 
     def _set_active_sidebar(self) -> None:
@@ -272,25 +305,38 @@ class Seoul2LineToolbox(tk.Tk):
         self.menu_buttons.clear()
 
         header = tk.Frame(self.tool_nav, bg=colors["nav"])
-        header.pack(fill="x", padx=18, pady=(20, 16))
-        tk.Label(header, text=section, font=("Segoe UI", 20, "bold"), fg=colors["text"], bg=colors["nav"]).pack(anchor="w")
+        header.pack(fill="x", padx=22, pady=(24, 28))
+        title_row = tk.Frame(header, bg=colors['nav'])
+        title_row.pack(fill='x')
+        tk.Label(title_row, text=section, font=("Malgun Gothic", 17, "bold"), fg=colors["text"], bg=colors["nav"]).pack(side='left')
+        tk.Button(title_row, text='‹', command=self.toggle_tool_nav, relief='flat', bd=0,
+                  bg=colors['nav'], fg=colors['muted'], cursor='hand2',
+                  font=('Segoe UI', 16)).pack(side='right')
         tk.Label(
             header,
             text=(self.registry.section_spec(section).description if self.registry.section_spec(section) else SECTION_DESCRIPTIONS.get(section, "")),
-            font=("Segoe UI", 9),
+            font=("Malgun Gothic", 10),
             fg=colors["muted"],
             bg=colors["nav"],
-            wraplength=230,
+            wraplength=180,
             justify="left",
         ).pack(anchor="w", pady=(6, 0))
 
-        tk.Label(self.tool_nav, text="도구", font=("Segoe UI", 8, "bold"), fg=colors["subtle"], bg=colors["nav"]).pack(anchor="w", padx=18, pady=(2, 8))
+        tk.Label(self.tool_nav, text="설정 메뉴" if section == "설정" else "도구", font=("Malgun Gothic", 11, "bold"), fg=colors["text"], bg=colors["nav"]).pack(anchor="w", padx=22, pady=(2, 12))
         list_canvas = tk.Canvas(self.tool_nav, bg=colors["nav"], highlightthickness=0, bd=0)
         list_canvas.pack(fill="both", expand=True, padx=12)
         list_host = tk.Frame(list_canvas, bg=colors["nav"])
         list_window = list_canvas.create_window((0, 0), window=list_host, anchor="nw")
         list_host.bind("<Configure>", lambda _event: list_canvas.configure(scrollregion=list_canvas.bbox("all")))
-        list_canvas.bind("<Configure>", lambda event: list_canvas.itemconfigure(list_window, width=event.width))
+        def resize_list(event):
+            list_canvas.itemconfigure(list_window, width=event.width)
+            list_canvas.delete('nav_background')
+            list_canvas._background = gradient_image(
+                list_canvas, event.width, event.height, colors['nav'],
+                colors['nav'])
+            list_canvas.create_image(0, 0, image=list_canvas._background, anchor='nw', tags='nav_background')
+            list_canvas.tag_lower('nav_background')
+        list_canvas.bind('<Configure>', resize_list)
         self._bind_wheel(list_canvas)
         for tool in tools:
             self.tool_buttons[tool.id] = self._tool_button(list_host, tool)
@@ -314,24 +360,27 @@ class Seoul2LineToolbox(tk.Tk):
             command=lambda spec=tool: self.show_tool(spec),
             colors=colors,
             compact=False,
-            radius=12,
+            radius=8,
             anchor="w",
-            height=42,
+            height=50,
+            role='tool',
+            icon_name=tool_icon(tool.id),
         )
-        button.pack(fill="x", pady=3)
+        button.pack(fill="x", pady=5, padx=5)
         return button
 
     def _menu_button(self, parent: tk.Widget, menu: MenuSpec) -> RoundedButton:
         colors = palette(self.dark_mode)
         button = RoundedButton(
             parent,
-            text=f"[menu] {menu.label}",
+            text=menu.label,
             command=lambda spec=menu: self.run_menu(spec),
             colors=colors,
             compact=False,
             radius=12,
             anchor="w",
             height=38,
+            icon_name='puzzle',
         )
         button.pack(fill="x", pady=3)
         return button
@@ -352,37 +401,53 @@ class Seoul2LineToolbox(tk.Tk):
             child.destroy()
 
         chrome = tk.Frame(self.workspace, bg=colors["app"])
-        chrome.pack(fill="both", expand=True, padx=22, pady=20)
+        chrome.pack(fill="both", expand=True, padx=28, pady=(24, 30))
 
-        topbar = tk.Frame(chrome, bg=colors["app"])
-        topbar.pack(fill="x", pady=(0, 14))
-        tk.Label(topbar, text=tool.label, font=("Segoe UI", 18, "bold"), fg=colors["text"], bg=colors["app"]).pack(side="left")
-        self.wallet_chip = tk.Canvas(topbar, width=230, height=34, bg=colors["app"], highlightthickness=0, bd=0)
-        self.wallet_chip.pack(side="right", padx=(12, 0))
-        self.wallet_chip.bind("<Configure>", lambda _event: self.refresh_wallet_display())
-        self.refresh_wallet_display()
-        self.stock_price_button = RoundedButton(
-            topbar,
-            self._stock_price_button_text(),
-            self.toggle_stock_price,
-            colors,
-            compact=True,
-            radius=10,
-        )
-        self.stock_price_button.pack(side="right", padx=(8, 0))
+        topbar = tk.Frame(chrome, bg=colors["app"], height=66)
+        topbar.pack(fill="x", pady=(0, 24))
+        topbar.pack_propagate(False)
+        heading = tk.Label(topbar, text=tool.label, font=("Malgun Gothic", 20, "bold"), fg=colors["text"], bg=colors["app"], anchor="w", justify="left")
+        heading.place(x=0, y=0)
+        heading.bind("<Configure>", lambda event: heading.configure(wraplength=max(180, event.width)))
+        actions = tk.Frame(topbar, bg=colors["app"])
+        actions.place(relx=1, y=12, anchor='ne')
+        has_actions = tool.section in ('미니게임', '개발자')
+        def resize_actions(event):
+            stacked = has_actions and event.width < 760
+            topbar.configure(height=(112 if stacked else 66) if has_actions else 42)
+            actions.place_configure(y=58 if stacked else 12)
+            if self.stock_price_button is not None:
+                self.stock_price_button.configure(width=180 if event.width < 540 else 220)
+        topbar.bind('<Configure>', resize_actions)
+        self.wallet_chip = None
+        self.stock_price_button = None
+        if tool.section == '미니게임':
+            self.wallet_chip = tk.Canvas(actions, width=230, height=44, bg=colors["app"], highlightthickness=0, bd=0)
+            self.wallet_chip.pack(side="right", padx=(12, 0))
+            self.wallet_chip.bind("<Configure>", lambda _event: self.refresh_wallet_display())
+            self.refresh_wallet_display()
+        if tool.id == 'minigame.korean_stocks':
+            self.stock_price_button = RoundedButton(
+                actions, self._stock_price_button_text(), self.toggle_stock_price, colors,
+                compact=True, radius=6, height=40, role='action', icon_name='power')
+            self.stock_price_button.configure(width=220)
+            self.stock_price_button.pack(side="right", padx=(8, 0))
         if tool.section == "개발자":
-            RoundedButton(topbar, "GPT", self.toggle_gpt_panel, colors, compact=True, radius=10).pack(side="right", padx=(8, 0))
-        tk.Label(topbar, text="Ctrl+K", font=("Segoe UI", 9, "bold"), fg=colors["accent"], bg=colors["app"]).pack(side="right")
-        tk.Label(topbar, text=f"{tool.section} / {tool.label}", font=("Segoe UI", 9), fg=colors["subtle"], bg=colors["app"]).pack(side="right", padx=(0, 12))
+            RoundedButton(actions, "GPT", self.toggle_gpt_panel, colors, compact=True, radius=10).pack(side="left", padx=(0, 8))
 
-        host_panel = RoundedFrame(chrome, colors, colors["panel"], colors["border"], radius=18, padding=4)
+        if tool.id == 'home.overview':
+            host_panel = tk.Frame(chrome, bg=colors['app'])
+            host_body = host_panel
+        else:
+            host_panel = RoundedFrame(chrome, colors, colors["panel"], colors["border"], radius=14, padding=4)
+            host_body = host_panel.body
         host_panel.pack(fill="both", expand=True)
         try:
-            tool.factory(host_panel.body, self).pack(fill="both", expand=True)
+            tool.factory(host_body, self).pack(fill="both", expand=True)
         except Exception as exc:
             # 특정 도구 초기화 실패가 전체 Toolbox 화면 전환을 막지 않게 격리한다.
             tk.Label(
-                host_panel.body,
+                host_body,
                 text=f"이 도구를 열지 못했습니다.\n{type(exc).__name__}: {exc}",
                 fg=colors["danger"],
                 bg=colors["panel"],
@@ -410,14 +475,15 @@ class Seoul2LineToolbox(tk.Tk):
         chip = self.wallet_chip
         chip.delete("all")
         width = max(chip.winfo_width(), 230)
-        height = 34
-        rounded_rect(chip, 1, 1, width - 1, height - 1, 17, fill=colors["surface_hover"], outline=colors["border"])
+        height = 44
+        rounded_rect(chip, 1, 1, width - 1, height - 1, 9, fill=colors["field"], outline=colors["border"])
         entries = wallet_entries(self.config_store)
         name, currency, amount = entries[0]
-        chip.create_oval(10, 8, 26, 24, fill=currency_color(currency), outline="")
-        chip.create_text(36, 17, text=name, anchor="w", fill=colors["muted"], font=("Segoe UI", 8, "bold"))
+        chip.create_oval(16, 14, 32, 30, fill=currency_color(currency), outline="")
+        chip.create_text(45, 22, text=name, anchor="w", fill=colors["text"], font=("Malgun Gothic", 9, "bold"))
+        chip.create_line(114, 14, 114, 30, fill=colors['border'])
         suffix = f"  +{len(entries) - 1}" if len(entries) > 1 else ""
-        chip.create_text(width - 12, 17, text=f"{format_coins(amount, currency)}{suffix}", anchor="e", fill=colors["text"], font=("Segoe UI", 9, "bold"))
+        chip.create_text(width - 14, 22, text=f"{format_coins(amount, currency)}{suffix}", anchor="e", fill=colors["action_ink"], font=("Segoe UI", 11, "bold"))
 
     def _render_empty(self, section: str) -> None:
         colors = palette(self.dark_mode)
@@ -437,7 +503,8 @@ class Seoul2LineToolbox(tk.Tk):
         self.show_section(target)
 
     def reload_theme(self) -> None:
-        self.dark_mode = self.config_store.get("theme", default="dark") == "dark"
+        self._close_command_palette()
+        self.dark_mode = ThemeMode(self.config_store.get("theme", default="dark"))
         self._configure_style()
         self.shell.destroy()
         self._build_layout()
@@ -457,7 +524,7 @@ class Seoul2LineToolbox(tk.Tk):
         RoundedButton(header, "닫기", self.toggle_gpt_panel, colors, compact=True, radius=10).grid(row=0, column=1, sticky="e")
         tk.Label(
             self.gpt_panel,
-            text="개발 중 GPT에 던질 프롬프트를 임시로 정리하고 바로 복사합니다. 브라우저 임베딩은 불안정해서 제거했습니다.",
+            text="질문이나 코드를 적고 복사할 수 있습니다.",
             font=("Segoe UI", 9),
             fg=colors["muted"],
             bg=colors["nav"],
@@ -513,9 +580,9 @@ class Seoul2LineToolbox(tk.Tk):
         return any(str(item) == str(child) for item in pane.panes())
 
     def _set_initial_panes(self) -> None:
-        if self.main_pane is not None and self.main_pane.winfo_width() > 0:
+        if self.main_pane is not None and not self.tool_nav_collapsed and self.main_pane.winfo_width() > 0:
             try:
-                self.main_pane.sash_place(0, 280, 1)
+                self.main_pane.sash_place(0, self.tool_nav_width, 1)
             except tk.TclError:
                 pass
         self._place_gpt_sash()
@@ -621,65 +688,124 @@ class Seoul2LineToolbox(tk.Tk):
         self.clipboard_clear()
         self.clipboard_append(self.gpt_prompt.get("1.0", "end-1c"))
 
-    def _open_command_palette(self, event: tk.Event | None = None) -> str:
-        if self.command_palette and self.command_palette.winfo_exists():
-            self.command_palette.lift()
-            if self.palette_query is not None:
-                self.palette_query.set("")
-            self._refresh_palette_results()
-            return "break"
-
+    def _build_search_header(self) -> None:
         colors = palette(self.dark_mode)
+        search_bg = colors.get('search_field', colors['field'])
+        search_fg = colors.get('search_text', colors['text'])
+        search_muted = colors.get('search_muted', colors['subtle'])
+        header_bg = colors.get("header", colors["sidebar"])
+        self.header = tk.Frame(self.shell, bg=header_bg, height=76,
+                               highlightthickness=1, highlightbackground=colors["border_soft"])
+        self.header.pack(fill="x")
+        self.header.pack_propagate(False)
+        self._header_logo = logo_image(self, 40)
+        tk.Label(self.header, image=self._header_logo,
+                 bg=header_bg).place(x=24, rely=.5, anchor="w")
+        self.wordmark = tk.Label(self.header, text="Toolbox", font=("Segoe UI", 21, "bold"),
+                                 fg=colors["sidebar_text"], bg=header_bg)
+        self.wordmark.place(x=80, rely=.5, anchor="w")
+        tk.Label(self.header, text=f"v{VERSION}", font=("Segoe UI", 9),
+                 fg=colors["sidebar_muted"], bg=header_bg).place(relx=1, x=-20, rely=.5, anchor="e")
+        self.search_box = RoundedFrame(self.header, colors, fill=search_bg,
+                                       border=colors["search_border"], radius=9, padding=10)
+        self.search_box.place(relx=.5, rely=.5, anchor="center", width=640, height=44)
+        search_icon = tk.Canvas(self.search_box.body, width=25, height=24,
+                                bg=search_bg, highlightthickness=0, bd=0)
+        search_icon.pack(side='left', padx=(4, 12))
+        icon(search_icon, 'search', 1, 1, 21, colors['hero_accent'])
+        search_icon.bind('<Button-1>', self._open_command_palette)
+        shortcut = tk.Label(self.search_box.body, text="Ctrl + K", font=("Segoe UI", 8),
+                            bg=colors.get('shortcut_bg', colors["panel_soft"]),
+                            fg=colors.get('shortcut_text', colors["action_ink"]), padx=7, pady=2,
+                            cursor="hand2")
+        shortcut.pack(side="right", padx=(10, 2))
+        shortcut.bind("<Button-1>", self._open_command_palette)
+        self.palette_query = tk.StringVar(self)
+        self.search_entry = tk.Entry(self.search_box.body, textvariable=self.palette_query,
+                                     bg=search_bg, fg=search_fg,
+                                     insertbackground=colors["accent"], relief="flat", bd=0,
+                                     font=("Segoe UI", 11))
+        self.search_entry.pack(side="left", fill="both", expand=True)
+        self.search_hint = tk.Label(self.search_entry, text="도구·메뉴 검색",
+                                    bg=search_bg, fg=search_muted,
+                                    font=("Segoe UI", 10), cursor="xterm")
+        self.search_hint.place(x=0, rely=.5, anchor="w")
+        self.search_hint.bind("<Button-1>", self._open_command_palette)
+        self.palette_query.trace_add("write", self._search_query_changed)
+        self.search_entry.bind("<FocusIn>", self._open_command_palette)
+        self.search_entry.bind("<Button-1>", self._click_search)
+        self.search_entry.bind("<Escape>", self._escape_search)
+        self.search_entry.bind("<Return>", lambda _event: self._run_first_palette_command())
+        self.search_entry.bind("<Down>", lambda _event: self._move_search_selection(1))
+        self.search_entry.bind("<Up>", lambda _event: self._move_search_selection(-1))
+        self.header.bind("<Configure>", self._resize_search)
+
+    def _click_search(self, event: tk.Event) -> None:
+        # Preserve Entry's normal caret placement and mouse text selection.
+        self._open_command_palette(event)
+
+    def _resize_search(self, event: tk.Event | None = None) -> None:
+        if event is not None and event.widget not in (self, self.header):
+            return
+        width = max(320, min(646, self.header.winfo_width() - 380))
+        narrow = self.header.winfo_width() < 1100
+        self.wordmark.configure(font=('Segoe UI', 17 if narrow else 21, 'bold'))
+        self.wordmark.place_configure(x=74 if narrow else 80)
+        self.search_box.place_configure(width=width)
+        if self.command_palette is not None:
+            self.command_palette.place_configure(relx=.5, x=0, y=68, width=width)
+
+    def _search_query_changed(self, *_args: str) -> None:
+        if self.palette_query.get():
+            self.search_hint.place_forget()
+        else:
+            self.search_hint.place(x=0, rely=.5, anchor="w")
+        self.palette_selection = 0
+        if self.command_palette is not None:
+            self._refresh_palette_results()
+        elif self.palette_query.get() and self.focus_get() == self.search_entry:
+            self._open_command_palette()
+
+    def _open_command_palette(self, event: tk.Event | None = None) -> str:
+        self.search_entry.focus_set()
+        if event is not None and getattr(event, "keysym", "").lower() == "k":
+            self.search_entry.selection_range(0, "end")
         self.palette_commands = self._build_palette_commands()
-        self.palette_query = tk.StringVar()
-        self.command_palette = tk.Toplevel(self)
-        self.command_palette.title("커맨드 팔레트")
-        self.command_palette.configure(bg=colors["app"])
-        self.command_palette.transient(self)
-        self.command_palette.resizable(False, False)
-
-        width = 640
-        height = 460
-        x = self.winfo_rootx() + max(24, (self.winfo_width() - width) // 2)
-        y = self.winfo_rooty() + 72
-        self.command_palette.geometry(f"{width}x{height}+{x}+{y}")
-
-        panel = tk.Frame(self.command_palette, bg=colors["panel"], highlightthickness=1, highlightbackground=colors["border"])
-        panel.pack(fill="both", expand=True, padx=1, pady=1)
-        tk.Label(panel, text="커맨드 팔레트", font=("Segoe UI", 13, "bold"), fg=colors["text"], bg=colors["panel"]).pack(anchor="w", padx=18, pady=(16, 8))
-        entry = tk.Entry(
-            panel,
-            textvariable=self.palette_query,
-            bg=colors["field"],
-            fg=colors["text"],
-            insertbackground=colors["accent"],
-            relief="flat",
-            bd=0,
-            font=("Segoe UI", 13),
-        )
-        entry.pack(fill="x", padx=18, ipady=10)
-        entry.bind("<KeyRelease>", lambda _event: self._refresh_palette_results())
-        entry.bind("<Escape>", lambda _event: self._close_command_palette())
-        entry.bind("<Return>", lambda _event: self._run_first_palette_command())
-
-        result_shell = tk.Frame(panel, bg=colors["panel"])
-        result_shell.pack(fill="both", expand=True, padx=12, pady=14)
-        canvas = tk.Canvas(result_shell, bg=colors["panel"], highlightthickness=0, bd=0)
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar = tk.Scrollbar(result_shell, orient="vertical", command=canvas.yview, bg=colors["panel"], troughcolor=colors["surface"], bd=0, relief="flat", highlightthickness=0)
-        scrollbar.pack(side="right", fill="y")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        self.palette_results = tk.Frame(canvas, bg=colors["panel"])
-        window_id = canvas.create_window((0, 0), window=self.palette_results, anchor="nw")
-        self.palette_results.bind("<Configure>", lambda _event: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.bind("<Configure>", lambda canvas_event: canvas.itemconfigure(window_id, width=canvas_event.width))
-        self._bind_wheel(canvas)
-
-        self.command_palette.bind("<Escape>", lambda _event: self._close_command_palette())
-        self.command_palette.protocol("WM_DELETE_WINDOW", self._close_command_palette)
+        if self.command_palette is None or not self.command_palette.winfo_exists():
+            colors = palette(self.dark_mode)
+            self.palette_selection = 0
+            self.command_palette = tk.Frame(self.shell, bg=colors["panel"],
+                                            highlightthickness=1, highlightbackground=colors["border"])
+            tk.Label(self.command_palette, text="빠른 이동   ·   ↑ ↓ 선택   Enter 실행   Esc 닫기",
+                     font=("Segoe UI", 8), bg=colors["panel"], fg=colors["muted"],
+                     anchor="w").pack(fill="x", padx=16, pady=(12, 6))
+            self.palette_results = tk.Frame(self.command_palette, bg=colors["panel"])
+            self.palette_results.pack(fill="both", expand=True, pady=(0, 8))
+            self._resize_search()
         self._refresh_palette_results()
-        entry.focus_set()
+        self.command_palette.lift()
         return "break"
+
+    def _move_search_selection(self, direction: int) -> str:
+        if self.command_palette is None:
+            self._open_command_palette()
+        if self.palette_matches:
+            self.palette_selection = (self.palette_selection + direction) % len(self.palette_matches)
+            self._refresh_palette_results()
+        return "break"
+
+    def _escape_search(self, _event: tk.Event | None = None) -> str:
+        self._close_command_palette()
+        self.workspace.focus_set()
+        return "break"
+
+    def _dismiss_search_outside(self, event: tk.Event) -> None:
+        widget = event.widget
+        while widget is not None:
+            if widget in (self.search_box, self.command_palette):
+                return
+            widget = getattr(widget, "master", None)
+        self._close_command_palette()
 
     def _build_palette_commands(self) -> list[PaletteCommand]:
         commands: list[PaletteCommand] = []
@@ -746,27 +872,29 @@ class Seoul2LineToolbox(tk.Tk):
             command
             for command in self.palette_commands
             if not query or query in command.title.lower() or query in command.subtitle.lower() or query in command.keywords.lower()
-        ][:12]
+        ][:6]
+        self.palette_matches = matches
+        self.palette_selection = min(self.palette_selection, max(0, len(matches) - 1))
         if not matches:
             tk.Label(self.palette_results, text="검색 결과가 없습니다.", fg=colors["muted"], bg=colors["panel"], font=("Segoe UI", 10)).pack(anchor="w", padx=8, pady=12)
             return
-        for command in matches:
-            item = tk.Frame(self.palette_results, bg=colors["surface_hover"], highlightthickness=1, highlightbackground=colors["border"])
+        for index, command in enumerate(matches):
+            fill = colors["accent_soft"] if index == self.palette_selection else colors["panel"]
+            item = tk.Frame(self.palette_results, bg=fill, highlightthickness=1, highlightbackground=colors["accent"] if index == self.palette_selection else colors["border_soft"])
             item.pack(fill="x", padx=6, pady=4)
             item.bind("<Button-1>", lambda _event, command=command: self._run_palette_command(command))
-            title = tk.Label(item, text=command.title, fg=colors["text"], bg=colors["surface_hover"], font=("Segoe UI", 10, "bold"), anchor="w")
+            title = tk.Label(item, text=command.title, fg=colors["text"], bg=fill, font=("Segoe UI", 10, "bold"), anchor="w")
             title.pack(fill="x", padx=12, pady=(9, 1))
             title.bind("<Button-1>", lambda _event, command=command: self._run_palette_command(command))
-            subtitle = tk.Label(item, text=command.subtitle, fg=colors["muted"], bg=colors["surface_hover"], font=("Segoe UI", 8), anchor="w")
+            subtitle = tk.Label(item, text=command.subtitle, fg=colors["muted"], bg=fill, font=("Segoe UI", 8), anchor="w")
             subtitle.pack(fill="x", padx=12, pady=(0, 9))
             subtitle.bind("<Button-1>", lambda _event, command=command: self._run_palette_command(command))
 
     def _run_first_palette_command(self) -> str:
-        query = (self.palette_query.get() if self.palette_query else "").strip().lower()
-        for command in self.palette_commands:
-            if not query or query in command.title.lower() or query in command.subtitle.lower() or query in command.keywords.lower():
-                self._run_palette_command(command)
-                break
+        if self.command_palette is None:
+            self._open_command_palette()
+        if self.palette_matches:
+            self._run_palette_command(self.palette_matches[self.palette_selection])
         return "break"
 
     def _run_palette_command(self, command: PaletteCommand) -> None:
@@ -777,11 +905,15 @@ class Seoul2LineToolbox(tk.Tk):
         if self.command_palette and self.command_palette.winfo_exists():
             self.command_palette.destroy()
         self.command_palette = None
-        self.palette_query = None
         self.palette_results = None
+        self.palette_matches = []
+        self.palette_selection = 0
+        if self.palette_query is not None:
+            self.palette_query.set("")
 
 
 def main() -> None:
+    configure_app_id()
     from app.single_instance import acquire_installed_instance
     if not acquire_installed_instance():
         messagebox.showinfo("seoul2line Toolbox", "앱이 이미 실행 중입니다.")

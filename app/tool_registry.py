@@ -5,6 +5,7 @@ from importlib import import_module
 import pkgutil
 from typing import Callable, Iterable
 import tkinter as tk
+from app.palette import palette
 
 
 ToolFactory = Callable[[tk.Widget, object], tk.Widget]
@@ -141,21 +142,30 @@ def load_builtin_tools() -> ToolRegistry:
 def cards(parent: tk.Widget, items: Iterable[tuple[str, str]]) -> tk.Frame:
     frame = tk.Frame(parent, bg=parent.cget("bg"))
     bg = parent.cget("bg")
+    colors = next((palette(name) for name in ("dark", "light", "green")
+                   if bg in (palette(name)["panel"], palette(name)["panel_soft"])), palette(True))
     for i, (title, body) in enumerate(items):
-        card = tk.Frame(frame, bg="#19232d" if bg != "#ffffff" else "#f6f8fb", highlightthickness=1, highlightbackground="#263342")
+        card = tk.Frame(frame, bg=colors["panel_soft"], highlightthickness=1, highlightbackground=colors["border"])
         card.grid(row=i // 2, column=i % 2, sticky="nsew", padx=10, pady=10)
-        tk.Label(card, text=title, font=("Segoe UI", 12, "bold"), fg="#edf2f7" if bg != "#ffffff" else "#16202a", bg=card.cget("bg")).pack(
+        title_label = tk.Label(card, text=title, font=("Segoe UI", 11, "bold"), fg=colors["text"], bg=card.cget("bg"), justify="left", anchor="w")
+        title_label.pack(
             anchor="w", padx=18, pady=(16, 5)
         )
-        tk.Label(
+        body_label = tk.Label(
             card,
             text=body,
             font=("Segoe UI", 9),
-            fg="#94a3b8" if bg != "#ffffff" else "#53616e",
+            fg=colors["muted"],
             bg=card.cget("bg"),
             justify="left",
             wraplength=260,
-        ).pack(anchor="w", padx=18, pady=(0, 16))
-    frame.columnconfigure(0, weight=1)
-    frame.columnconfigure(1, weight=1)
+        )
+        body_label.pack(anchor="w", padx=18, pady=(0, 16))
+        def fit(event, title_label=title_label, body_label=body_label):
+            width = max(100, event.width - 36)
+            title_label.configure(wraplength=width)
+            body_label.configure(wraplength=width)
+        card.bind("<Configure>", fit)
+    frame.columnconfigure(0, weight=1, uniform="cards", minsize=120)
+    frame.columnconfigure(1, weight=1, uniform="cards", minsize=120)
     return frame

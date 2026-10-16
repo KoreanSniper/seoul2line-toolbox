@@ -21,6 +21,7 @@ OutputBaseFilename=seoul2line-toolbox-setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\app\assets\toolbox.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64compatible

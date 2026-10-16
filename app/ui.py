@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from typing import Callable
+from app.theme_art import gradient_image, icon, blend
 
 
 def rounded_rect(canvas: tk.Canvas, x1: int, y1: int, x2: int, y2: int, radius: int, **kwargs) -> int:
@@ -86,12 +87,16 @@ class RoundedButton(tk.Canvas):
         radius: int = 11,
         anchor: str = "w",
         height: int | None = None,
+        role: str | None = None,
+        icon_name: str | None = None,
     ) -> None:
         self.colors = colors
         self.command = command
         self.text = text
         self.accent = accent
         self.active = False
+        self.role = role
+        self.icon_name = icon_name
         self.radius = radius
         self.text_anchor = anchor
         self.pad_x = 12 if compact else 16
@@ -103,12 +108,21 @@ class RoundedButton(tk.Canvas):
             highlightthickness=0,
             bd=0,
             cursor="hand2",
+            takefocus=True,
         )
         self.bind("<Configure>", lambda _event: self._draw())
         self.bind("<Button-1>", lambda _event: self.command())
+        self.bind("<Return>", self._invoke_key)
+        self.bind("<space>", self._invoke_key)
+        self.bind("<FocusIn>", lambda _event: self._draw())
+        self.bind("<FocusOut>", lambda _event: self._draw())
         self.bind("<Enter>", lambda _event: self._draw(hover=True))
         self.bind("<Leave>", lambda _event: self._draw())
         self._draw()
+
+    def _invoke_key(self, _event: tk.Event) -> str:
+        self.command()
+        return "break"
 
     def set_active(self, active: bool) -> None:
         self.active = active
@@ -121,20 +135,50 @@ class RoundedButton(tk.Canvas):
             fill = self.colors["accent"]
             fg = self.colors["accent_text"]
         elif self.active:
-            fill = self.colors["accent_soft"]
-            fg = self.colors["accent"]
+            fill = self.colors.get("selection", self.colors["accent_soft"])
+            fg = self.colors.get("selection_text", self.colors["accent"])
         else:
             fill = self.colors["surface_hover"] if hover else self.colors["field"]
             fg = self.colors["text"]
-        rounded_rect(self, 1, 1, width - 1, self.height - 1, self.radius, fill=fill, outline=self.colors["border"])
+        focused = self.focus_get() == self
+        outline = self.colors["accent"] if hover or focused else self.colors["border"]
+        if self.role in ('sidebar', 'tool'):
+            fg = self.colors['sidebar_text' if self.role == 'sidebar' else 'nav_idle_text']
+            fill = self.colors['sidebar' if self.role == 'sidebar' else 'nav']
+            if hover:
+                fill = blend(fill, fg, .08)
+            outline = fill
+            if self.active:
+                fill = self.colors['accent_soft']
+                fg = self.colors['text']
+                outline = fill
+        if focused:
+            outline = self.colors['brand']
+        if self.role in ('sidebar', 'tool'):
+            self._gradient = gradient_image(self, width - 2, self.height - 2, fill,
+                                            fill,
+                                            radius=self.radius, border=outline, horizontal=True)
+            self.create_image(1, 1, image=self._gradient, anchor='nw')
+        else:
+            rounded_rect(self, 1, 1, width - 1, self.height - 1, self.radius,
+                         fill=fill, outline=outline, width=2 if focused else 1)
         text_x = width // 2 if self.text_anchor == "center" else self.pad_x
+        if self.icon_name:
+            ink = self.colors['accent'] if self.active else fg
+            if self.role == 'action':
+                ink = self.colors['action_ink']
+            icon(self, self.icon_name, 18, (self.height - 22) / 2, 22, ink)
+            text_x = 52
+        if self.active and self.role in ('sidebar', 'tool'):
+            self.create_line(3, 12, 3, self.height - 12, fill=self.colors['accent'], width=2)
         self.create_text(
             text_x,
             self.height // 2,
             text=self.text,
+            width=max(40, width - text_x - 12) if self.icon_name else 0,
             anchor="center" if self.text_anchor == "center" else "w",
             fill=fg,
-            font=("Segoe UI", 9, "bold"),
+            font=("Malgun Gothic", 10 if self.role else 9, "bold"),
         )
 
 

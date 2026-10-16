@@ -86,9 +86,10 @@ class ScreenshotHotkeyManager:
         self._show_toast(f"캡쳐 완료\n{path.name}")
 
     def _show_toast(self, text: str) -> None:
-        colors = getattr(self.root, "dark_mode", True)
-        bg = "#111820" if colors else "#ffffff"
-        fg = "#edf2f7" if colors else "#16202a"
+        from app.palette import palette
+        colors = palette(getattr(self.root, "dark_mode", True))
+        bg = colors["panel"]
+        fg = colors["text"]
         toast = tk.Toplevel(self.root)
         toast.overrideredirect(True)
         toast.attributes("-topmost", True)
