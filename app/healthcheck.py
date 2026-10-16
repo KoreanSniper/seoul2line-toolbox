@@ -13,6 +13,7 @@ def run(report_path: str) -> int:
         from app.config import APP_DIR
         from app.version import VERSION
         from app.tools.system_monitor import SystemMonitor
+        from app.games.trsim.view import RailPanic
         app = Seoul2LineToolbox()
         app.withdraw()
         app.updater.close()
@@ -33,6 +34,14 @@ def run(report_path: str) -> int:
         app.show_section("설정")
         app.update_idletasks()
         assert not monitor_view.winfo_exists()
+        trsim = next(tool for tool in app.registry.tools_for('미니게임') if tool.id == 'minigame.trsim')
+        app.show_tool(trsim)
+        app.update_idletasks()
+        trsim_view = next(widget for widget in descendants(app.workspace) if isinstance(widget, RailPanic))
+        assert len(trsim_view.nodes) == 14 and trsim_view._tick_job is not None
+        app.show_section('설정')
+        app.update_idletasks()
+        assert not trsim_view.winfo_exists() and trsim_view._tick_job is None
         tools = [tool.id for section in app.registry.sections() for tool in app.registry.tools_for(section)]
         assert "minigame.micro_warfare" in tools and "minigame.orbit_lab" in tools
         assert not [plugin.error for plugin in app.plugin_manager.plugins if plugin.error]
@@ -40,7 +49,7 @@ def run(report_path: str) -> int:
             assert (Path(sys._MEIPASS) / "updater/install_update.ps1").is_file()
             assert {plugin.id for plugin in app.plugin_manager.plugins} >= {"developer_tools", "example_plugin"}
         report.update(ok=True, version=VERSION, tool_count=len(tools), data_directory=str(APP_DIR),
-                      plugins=[plugin.id for plugin in app.plugin_manager.plugins], checked_tools=["settings.preferences", "home.system_monitor"])
+                      plugins=[plugin.id for plugin in app.plugin_manager.plugins], checked_tools=["settings.preferences", "home.system_monitor", "minigame.trsim"])
     except Exception:
         report["error"] = traceback.format_exc()
     finally:

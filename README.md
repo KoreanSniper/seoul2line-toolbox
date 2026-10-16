@@ -79,7 +79,7 @@ powershell -ExecutionPolicy Bypass -File installer\build.ps1 -InstallDependencie
 
 - 미니게임 허브
 - GPU 항성계 시뮬레이터
-- TRSim
+- TRSim: 앱 내장 철도 관제 게임 — 분기 전환·열차 운행·충돌 회피·저장/불러오기 ([안내](docs/TRSIM.md))
 - 공장 자동화
 - Micro Warfare: 2D RTS 전장, A* 이동, 채굴·건설·생산, 자동 교전과 적 경제·전략 AI, 3가지 게임 모드, 저장·불러오기 및 전투 통계
 - Orbit Lab: 2D 우주 공간, 천체·위성 생성과 질량 설정, 만유인력 시뮬레이션, 시간 제어 및 우주선 발사·추력 제어

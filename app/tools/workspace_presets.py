@@ -23,7 +23,7 @@ PRESETS = {
     ],
     "미니게임": [
         ("항성계", "py -m app.tools.chill_starsystem_gpu --run"),
-        ("TRSim", "py ..\\..\\GAME_MOD\\TRSim\\main.py"),
+        ("TRSim", "toolbox:minigame.trsim"),
     ],
 }
 
@@ -56,6 +56,14 @@ class WorkspacePresets(tk.Frame):
         root = Path(__file__).resolve().parents[2]
         for _label, command in commands:
             if not command:
+                continue
+            if command.startswith('toolbox:'):
+                tool_id = command.removeprefix('toolbox:')
+                tool = next((tool for section in self.app.registry.sections()
+                             for tool in self.app.registry.tools_for(section) if tool.id == tool_id), None)
+                if tool is not None:
+                    # Defer navigation until all commands in this preset have been dispatched.
+                    self.app.after_idle(lambda tool=tool: self.app.show_tool_from_palette(tool))
                 continue
             try:
                 subprocess.Popen(command, cwd=root, shell=True)
