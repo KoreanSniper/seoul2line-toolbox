@@ -41,6 +41,13 @@ class RawMouse:
         self.user.ClipCursor.restype = W.BOOL
         self.user.GetClipCursor.argtypes = [C.POINTER(W.RECT)]
         self.user.GetClipCursor.restype = W.BOOL
+        self.user.GetAncestor.argtypes = [W.HWND, W.UINT]
+        self.user.GetAncestor.restype = W.HWND
+        self.user.GetForegroundWindow.restype = W.HWND
+        self.user.GetClientRect.argtypes = [W.HWND, C.POINTER(W.RECT)]
+        self.user.GetClientRect.restype = W.BOOL
+        self.user.ClientToScreen.argtypes = [W.HWND, C.POINTER(W.POINT)]
+        self.user.ClientToScreen.restype = W.BOOL
         self.clip = None
         proc_type = C.WINFUNCTYPE(C.c_ssize_t, W.HWND, W.UINT, W.WPARAM, W.LPARAM)
         self.callback = proc_type(self._receive)
@@ -76,12 +83,25 @@ class RawMouse:
         return result
 
     def confine(self, x, y):
-        previous = W.RECT()
-        if not self.user.GetClipCursor(C.byref(previous)):
-            raise C.WinError(C.get_last_error())
-        self.clip = previous
+        if self.clip is None:
+            previous = W.RECT()
+            if not self.user.GetClipCursor(C.byref(previous)):
+                raise C.WinError(C.get_last_error())
+            self.clip = previous
         if not self.user.ClipCursor(C.byref(W.RECT(x, y, x + 1, y + 1))):
             raise C.WinError(C.get_last_error())
+
+    def confine_center(self):
+        if self.closed or self.user.GetForegroundWindow() != self.user.GetAncestor(self.hwnd, 2):
+            return False
+        client = W.RECT()
+        if not self.user.GetClientRect(self.hwnd, C.byref(client)):
+            raise C.WinError(C.get_last_error())
+        point = W.POINT((client.left + client.right) // 2, (client.top + client.bottom) // 2)
+        if not self.user.ClientToScreen(self.hwnd, C.byref(point)):
+            raise C.WinError(C.get_last_error())
+        self.confine(point.x, point.y)
+        return True
 
     def close(self):
         if self.closed:

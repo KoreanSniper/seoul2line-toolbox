@@ -17,12 +17,12 @@ from app.tools.gaming_aim_trainer import register
 
 
 class AimModelTests(unittest.TestCase):
-    def test_edpi_one_and_physical_distance_independent_of_dpi(self):
+    def test_edpi_800_and_physical_distance_independent_of_dpi(self):
         for dpi in (400, 800, 1600, 3200):
             setting = Sensitivity(dpi, .07, 103)
-            self.assertEqual(setting.dpi * setting.sensitivity, 1)
-            self.assertAlmostEqual(setting.angle(dpi), .07)
-            self.assertAlmostEqual(setting.cm360, 360 * 2.54 / .07)
+            self.assertEqual(setting.dpi * setting.sensitivity, 800)
+            self.assertAlmostEqual(setting.angle(dpi), 56)
+            self.assertAlmostEqual(setting.cm360, 360 * 2.54 / (.07 * 800))
 
     def test_bad_settings_rejected(self):
         for args in ((0, 1, 90), (800, 0, 90), (800, 1, 180), (math.nan, 1, 90), (800, math.inf, 90)):
@@ -53,6 +53,44 @@ class AimModelTests(unittest.TestCase):
 
 
 class RawInputTests(unittest.TestCase):
+    def test_capture_uses_native_coordinates_and_restores_original_clip(self):
+        raw = RawMouse.__new__(RawMouse)
+        raw.hwnd, raw.closed, raw.clip, raw.old_proc = 7, False, None, None
+        raw.user = Mock()
+        raw.user.GetForegroundWindow.return_value = 200
+        raw.user.GetAncestor.return_value = 200
+        def client(hwnd, pointer):
+            pointer._obj.right, pointer._obj.bottom = 1000, 600
+            return 1
+        def screen(hwnd, pointer):
+            pointer._obj.x -= 1000
+            pointer._obj.y += 200
+            return 1
+        def previous(pointer):
+            pointer._obj.left, pointer._obj.top = -1920, 0
+            pointer._obj.right, pointer._obj.bottom = 1920, 1080
+            return 1
+        rectangles = []
+        def clip(pointer):
+            rect = pointer._obj
+            rectangles.append((rect.left, rect.top, rect.right, rect.bottom))
+            return 1
+        raw.user.GetClientRect.side_effect = client
+        raw.user.ClientToScreen.side_effect = screen
+        raw.user.GetClipCursor.side_effect = previous
+        raw.user.ClipCursor.side_effect = clip
+        self.assertTrue(raw.confine_center())
+        self.assertTrue(raw.confine_center())
+        self.assertEqual(rectangles, [(-500, 500, -499, 501)] * 2)
+        raw.user.GetClipCursor.assert_called_once()
+        raw.user.GetForegroundWindow.return_value = 999
+        self.assertFalse(raw.confine_center())
+        self.assertEqual(len(rectangles), 2)
+        raw.close()
+        self.assertEqual(rectangles[-1], (-1920, 0, 1920, 1080))
+        raw.close()
+        raw.user.RegisterRawInputDevices.assert_called_once()
+
     def test_native_registration_and_restore_without_cursor_capture(self):
         root = tk.Tk()
         root.withdraw()
@@ -100,7 +138,7 @@ class AimUITests(unittest.TestCase):
         self.addCleanup(self.cleanup_ui)
         self.view = AimTrainer(self.root, SimpleNamespace(dark_mode=True))
         self.view.size = lambda: (800, 400)
-        self.raw = SimpleNamespace(error=None, take=lambda: (0, 0), close=Mock(), confine=Mock())
+        self.raw = SimpleNamespace(error=None, take=lambda: (0, 0), close=Mock(), confine_center=Mock(return_value=True))
         self.native = patch("app.games.aim_trainer.view.RawMouse", return_value=self.raw)
         self.native.start()
         self.addCleanup(self.native.stop)
@@ -116,7 +154,7 @@ class AimUITests(unittest.TestCase):
     def test_start_hit_stop_and_destroy_release_input_and_timer(self):
         self.view.start()
         self.assertTrue(self.view.active)
-        self.assertEqual(self.view.settings.dpi * self.view.settings.sensitivity, 1)
+        self.assertEqual(self.view.settings.dpi * self.view.settings.sensitivity, 800)
         self.view.world_target = tuple(self.view.camera)
         self.view.shoot()
         self.assertEqual((self.view.session.hits, self.view.session.shots), (1, 1))
@@ -146,6 +184,36 @@ class AimUITests(unittest.TestCase):
         self.view.tick()
         self.assertFalse(self.view.active)
         self.assertIsNone(self.view.raw)
+
+    def test_start_remains_active_after_real_layout_updates(self):
+        del self.view.size
+        self.root.geometry("1000x780")
+        self.view.pack(fill="both", expand=True)
+        self.root.deiconify()
+        self.root.update()
+        before = self.view.size()
+        self.view.start()
+        self.root.update()
+        self.assertTrue(self.view.active)
+        self.assertEqual(self.view.size(), before)
+        self.assertIn("eDPI 800", self.view.status.get())
+        self.view.stop()
+
+    def test_foreground_loss_and_capture_error_release_input(self):
+        for result in (False, OSError("capture failure")):
+            self.raw.confine_center.side_effect = None
+            self.raw.confine_center.return_value = True
+            self.view.start()
+            self.view.after_cancel(self.view.job)
+            self.view.job = None
+            if isinstance(result, Exception):
+                self.raw.confine_center.side_effect = result
+            else:
+                self.raw.confine_center.return_value = result
+            self.view.tick()
+            self.assertFalse(self.view.active)
+            self.assertIsNone(self.view.raw)
+            self.assertIsNone(self.view.job)
 
     def test_three_themes_and_game_menu_icon(self):
         for mode in ThemeMode:

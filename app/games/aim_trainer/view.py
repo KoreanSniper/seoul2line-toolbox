@@ -36,10 +36,10 @@ class AimTrainer(tk.Frame):
             variable = tk.StringVar(self, default)
             self.fields[key] = variable
             tk.Entry(form, textvariable=variable, bg=colors["field"], fg=colors["text"], insertbackground=colors["text"], width=14).grid(row=row + 1, column=column, sticky="ew", padx=(0, 10), pady=(3, 8))
-        tk.Label(self, text="eDPI 1 고정 · 감도 = 1 ÷ DPI. 회전 계수는 해당 게임의 감도 1에서 입력 1카운트당 회전각입니다.\n게임 이름은 메모용이며 계수를 자동으로 바꾸지 않습니다. 기본 계수 1은 사용자 정의값입니다.\neDPI 1은 매우 낮은 감도입니다. 연습 중에는 커서가 고정되며 Esc로 해제합니다.",
+        tk.Label(self, text="eDPI 800 고정 · 감도 = 800 ÷ DPI. 회전 계수는 해당 게임의 감도 1에서 입력 1카운트당 회전각입니다.\n게임 이름은 메모용이며 계수를 자동으로 바꾸지 않습니다. 기본 계수 1은 사용자 정의값입니다.\n연습 중에는 커서가 고정되며 Esc로 해제합니다.",
                  bg=colors["panel"], fg=colors["muted"], justify="left", anchor="w", wraplength=760).grid(row=2, column=0, sticky="ew")
         self.status = tk.StringVar(self, "설정 후 시작 · 좌클릭 발사 · Esc 또는 화면 이탈 시 종료")
-        tk.Label(self, textvariable=self.status, bg=colors["panel"], fg=colors["text"], anchor="w", justify="left", wraplength=760).grid(row=3, column=0, sticky="ew", pady=8)
+        tk.Label(self, textvariable=self.status, bg=colors["panel"], fg=colors["text"], anchor="w", justify="left", wraplength=760, height=3).grid(row=3, column=0, sticky="ew", pady=8)
         self.canvas = tk.Canvas(self, bg=colors["field"], highlightthickness=1, highlightbackground=colors["border"], takefocus=True)
         self.canvas.grid(row=4, column=0, sticky="nsew")
         self.canvas.bind("<Button-1>", self.shoot)
@@ -59,12 +59,14 @@ class AimTrainer(tk.Frame):
             duration, radius = float(self.fields["duration"].get()), float(self.fields["radius"].get())
             if not math.isfinite(duration) or not 5 <= duration <= 600 or not math.isfinite(radius) or not 4 <= radius <= 80:
                 raise ValueError("연습 시간은 5~600초, 표적 반지름은 4~80px로 입력하세요.")
+            self.update_idletasks()
             width, height = self.size()
             if min(width, height) < 2 * (radius + 8):
                 raise ValueError("연습 영역이 작습니다. 창을 넓히거나 표적 크기를 줄이세요.")
             self.canvas.focus_set()
             self.raw = RawMouse(self.canvas.winfo_id())
-            self.raw.confine(self.canvas.winfo_rootx() + width // 2, self.canvas.winfo_rooty() + height // 2)
+            if not self.raw.confine_center():
+                raise ValueError("툴박스 창을 활성화한 뒤 다시 시작하세요.")
         except (ValueError, OSError, AttributeError) as exc:
             self.release_input()
             self.status.set(str(exc))
@@ -115,6 +117,13 @@ class AimTrainer(tk.Frame):
         if self.session.remaining(time.perf_counter()) <= 0:
             self.stop("연습 완료")
             return
+        try:
+            if not self.raw.confine_center():
+                self.stop("화면 이탈 · 연습 종료")
+                return
+        except OSError as exc:
+            self.stop("커서 고정 실패: " + str(exc))
+            return
         self.update_input()
         self.draw()
         self.job = self.after(16, self.tick)
@@ -134,7 +143,7 @@ class AimTrainer(tk.Frame):
         self.canvas.create_line(x - 9, y, x + 9, y, fill=self.colors["text"], width=2)
         self.canvas.create_line(x, y - 9, x, y + 9, fill=self.colors["text"], width=2)
         if self.active:
-            self.status.set(f"남은 시간 {self.session.remaining(time.perf_counter()):.1f}초 · {self.summary()}\neDPI 1 · 감도 {self.settings.sensitivity:.8g} · 360° 약 {self.settings.cm360:.1f}cm · Esc 종료")
+            self.status.set(f"남은 시간 {self.session.remaining(time.perf_counter()):.1f}초 · {self.summary()}\neDPI 800 · 감도 {self.settings.sensitivity:.8g} · 360° 약 {self.settings.cm360:.1f}cm · Esc 종료")
 
     def resize(self, event=None):
         if self.active:

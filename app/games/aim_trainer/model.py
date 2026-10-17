@@ -4,6 +4,8 @@ import math
 import random
 from dataclasses import dataclass
 
+TARGET_EDPI = 800
+
 
 @dataclass(frozen=True)
 class Sensitivity:
@@ -19,11 +21,11 @@ class Sensitivity:
 
     @property
     def sensitivity(self):
-        return 1 / self.dpi
+        return TARGET_EDPI / self.dpi
 
     @property
     def cm360(self):
-        return 360 * 2.54 / self.coefficient
+        return 360 * 2.54 / (self.coefficient * TARGET_EDPI)
 
     def angle(self, counts):
         return counts * self.sensitivity * self.coefficient
