@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+from ctypes import wintypes
 from pathlib import Path
 import shutil
 import subprocess
@@ -26,6 +27,18 @@ class MEMORYSTATUSEX(ctypes.Structure):
     ]
 
 
+def cpu_times() -> tuple[int, int, int]:
+    """Return Windows cumulative idle, kernel (including idle), and user ticks."""
+    get_times = ctypes.WinDLL("kernel32", use_last_error=True).GetSystemTimes
+    get_times.argtypes = [ctypes.POINTER(wintypes.FILETIME)] * 3
+    get_times.restype = wintypes.BOOL
+    idle, kernel, user = wintypes.FILETIME(), wintypes.FILETIME(), wintypes.FILETIME()
+    if not get_times(ctypes.byref(idle), ctypes.byref(kernel), ctypes.byref(user)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    return tuple((value.dwHighDateTime << 32) | value.dwLowDateTime
+                 for value in (idle, kernel, user))
+
+
 class SystemMonitor(tk.Frame):
     def __init__(self, parent: tk.Widget, app: object) -> None:
         super().__init__(parent, bg=palette(app.dark_mode)["panel"])
@@ -34,6 +47,7 @@ class SystemMonitor(tk.Frame):
         self.running = True
         self._refresh_job: str | None = None
         self.last_net: tuple[int, int, float] | None = None
+        self.last_cpu: tuple[int, int, int] | None = None
         self._build()
         self.refresh()
 
@@ -97,21 +111,19 @@ class SystemMonitor(tk.Frame):
 
     def cpu_snapshot(self) -> str:
         try:
-            result = subprocess.run(
-                ["wmic", "cpu", "get", "loadpercentage", "/value"],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=1.8,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-            for line in result.stdout.splitlines():
-                if line.startswith("LoadPercentage="):
-                    return f"{line.split('=', 1)[1]}%"
-        except Exception:
-            pass
-        return "확인 불가"
+            current = cpu_times()
+        except (OSError, AttributeError):
+            self.last_cpu = None
+            return "확인 불가"
+        previous, self.last_cpu = self.last_cpu, current
+        if previous is None:
+            return "측정 중"
+        idle, kernel, user = (now - old for now, old in zip(current, previous))
+        total = kernel + user
+        if min(idle, kernel, user) < 0 or total <= 0:
+            return "측정 중"
+        usage = max(0.0, min(100.0, (total - idle) / total * 100))
+        return f"{usage:.0f}%"
 
     def gpu_snapshot(self) -> tuple[str, str]:
         try:
