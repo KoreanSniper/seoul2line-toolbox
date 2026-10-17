@@ -1,6 +1,8 @@
-"""Foreground-only Windows raw mouse input; no keyboard/global hooks."""
+"""Raw mouse deltas collected off the Tk thread; foreground packets only."""
 import ctypes as C
 from ctypes import wintypes as W
+import threading
+import time
 
 
 class Device(C.Structure):
@@ -25,18 +27,19 @@ class RawMouse:
         self.hwnd = hwnd
         self.dx = self.dy = 0
         self.error = None
-        self.old_proc = None
+        self.lock = threading.Lock()
+        self.packets = 0
+        self.last_packet = None
+        self.pending_since = None
+        self.consumed_age_ms = 0.0
         self.closed = False
         self.user = C.WinDLL("user32", use_last_error=True)
         self.user.RegisterRawInputDevices.argtypes = [C.POINTER(Device), W.UINT, W.UINT]
         self.user.RegisterRawInputDevices.restype = W.BOOL
         self.user.GetRawInputData.argtypes = [W.HANDLE, W.UINT, W.LPVOID, C.POINTER(W.UINT), W.UINT]
         self.user.GetRawInputData.restype = W.UINT
-        self.set_proc = self.user.SetWindowLongPtrW if C.sizeof(C.c_void_p) == 8 else self.user.SetWindowLongW
-        self.set_proc.argtypes = [W.HWND, C.c_int, C.c_ssize_t]
-        self.set_proc.restype = C.c_ssize_t
-        self.user.CallWindowProcW.argtypes = [C.c_void_p, W.HWND, W.UINT, W.WPARAM, W.LPARAM]
-        self.user.CallWindowProcW.restype = C.c_ssize_t
+        self.user.DefWindowProcW.argtypes = [W.HWND, W.UINT, W.WPARAM, W.LPARAM]
+        self.user.DefWindowProcW.restype = C.c_ssize_t
         self.user.ClipCursor.argtypes = [C.POINTER(W.RECT)]
         self.user.ClipCursor.restype = W.BOOL
         self.user.GetClipCursor.argtypes = [C.POINTER(W.RECT)]
@@ -49,16 +52,8 @@ class RawMouse:
         self.user.ClientToScreen.argtypes = [W.HWND, C.POINTER(W.POINT)]
         self.user.ClientToScreen.restype = W.BOOL
         self.clip = None
-        proc_type = C.WINFUNCTYPE(C.c_ssize_t, W.HWND, W.UINT, W.WPARAM, W.LPARAM)
-        self.callback = proc_type(self._receive)
-        C.set_last_error(0)
-        self.old_proc = self.set_proc(hwnd, -4, C.cast(self.callback, C.c_void_p).value)
-        if not self.old_proc:
-            raise C.WinError(C.get_last_error())
-        if not self.user.RegisterRawInputDevices(C.byref(Device(1, 2, 0, hwnd)), 1, C.sizeof(Device)):
-            self.set_proc(hwnd, -4, self.old_proc)
-            self.old_proc = None
-            raise C.WinError(C.get_last_error())
+        from app.games.aim_trainer.raw_collector import RawCollector
+        self.collector = RawCollector(self)
 
     def _receive(self, hwnd, message, param, handle):
         if message == 0x00FF and not self.closed:
@@ -67,20 +62,37 @@ class RawMouse:
                 count = self.user.GetRawInputData(handle, 0x10000003, C.byref(packet), C.byref(size), C.sizeof(Header))
                 if count == 0xFFFFFFFF:
                     raise C.WinError(C.get_last_error())
-                if count >= C.sizeof(Packet) and packet.header.kind == 0:
+                if count >= C.sizeof(Packet) and packet.header.kind == 0 and self.is_foreground():
                     if packet.mouse.flags & 1:
                         self.error = "상대 이동을 지원하는 마우스가 필요합니다."
                     else:
-                        self.dx += packet.mouse.x
-                        self.dy += packet.mouse.y
+                        with self.lock:
+                            now = time.perf_counter()
+                            if self.pending_since is None:
+                                self.pending_since = now
+                            self.dx += packet.mouse.x
+                            self.dy += packet.mouse.y
+                            self.packets += 1
+                            self.last_packet = now
             except Exception as exc:
                 self.error = str(exc)
-        return self.user.CallWindowProcW(self.old_proc, hwnd, message, param, handle)
+        return self.user.DefWindowProcW(hwnd, message, param, handle)
 
     def take(self):
-        result = self.dx, self.dy
-        self.dx = self.dy = 0
-        return result
+        with self.lock:
+            if self.pending_since is not None:
+                self.consumed_age_ms = (time.perf_counter() - self.pending_since) * 1000
+                self.pending_since = None
+            result = self.dx, self.dy
+            self.dx = self.dy = 0
+            return result
+
+    def metrics(self):
+        with self.lock:
+            return self.packets, self.last_packet, self.consumed_age_ms
+
+    def is_foreground(self):
+        return not self.closed and self.user.GetForegroundWindow() == self.user.GetAncestor(self.hwnd, 2)
 
     def confine(self, x, y):
         if self.clip is None:
@@ -92,7 +104,7 @@ class RawMouse:
             raise C.WinError(C.get_last_error())
 
     def confine_center(self):
-        if self.closed or self.user.GetForegroundWindow() != self.user.GetAncestor(self.hwnd, 2):
+        if not self.is_foreground():
             return False
         client = W.RECT()
         if not self.user.GetClientRect(self.hwnd, C.byref(client)):
@@ -110,7 +122,4 @@ class RawMouse:
         if self.clip is not None:
             self.user.ClipCursor(C.byref(self.clip))
             self.clip = None
-        self.user.RegisterRawInputDevices(C.byref(Device(1, 2, 1, None)), 1, C.sizeof(Device))
-        if self.old_proc:
-            self.set_proc(self.hwnd, -4, self.old_proc)
-            self.old_proc = None
+        self.collector.close()

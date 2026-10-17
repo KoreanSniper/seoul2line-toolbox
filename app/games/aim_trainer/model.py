@@ -7,6 +7,22 @@ from dataclasses import dataclass
 TARGET_EDPI = 800
 
 
+class StepClock:
+    """120 Hz movement steps with a bounded catch-up after a GUI stall."""
+    step = 1 / 120
+
+    def __init__(self, now):
+        self.previous = now
+        self.pending = 0.0
+
+    def consume(self, now):
+        self.pending += min(.25, max(0, now - self.previous))
+        self.previous = now
+        count = int((self.pending + 1e-10) / self.step)
+        self.pending = max(0.0, self.pending - count * self.step)
+        return count
+
+
 @dataclass(frozen=True)
 class Sensitivity:
     dpi: float

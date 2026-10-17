@@ -3,11 +3,12 @@ import gc
 import math
 import random
 import tkinter as tk
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from app.games.aim_trainer.model import AimSession, Camera, Sensitivity, dot, project, ray_sphere
+from app.games.aim_trainer.model import AimSession, Camera, Sensitivity, StepClock, dot, project, ray_sphere
 from app.games.aim_trainer.scene import render_faces
 from app.games.aim_trainer.raw_mouse import Header, Mouse, Packet, RawMouse
 from app.games.aim_trainer.view import AimTrainer
@@ -18,6 +19,15 @@ from app.tools.gaming_aim_trainer import register
 
 
 class AimModelTests(unittest.TestCase):
+    def test_fixed_steps_follow_elapsed_time_and_bound_stall_catchup(self):
+        clock = StepClock(0)
+        self.assertEqual(clock.consume(.004), 0)
+        self.assertEqual(clock.consume(.01), 1)
+        self.assertEqual(clock.consume(.1), 11)
+        self.assertEqual(clock.consume(3), 30)
+        self.assertEqual(clock.consume(3), 0)
+        self.assertEqual(clock.consume(3 + 1 / 120), 1)
+
     def test_edpi_800_and_physical_distance_independent_of_dpi(self):
         for dpi in (400, 800, 1600, 3200):
             setting = Sensitivity(dpi, .07, 103)
@@ -103,7 +113,8 @@ class AimModelTests(unittest.TestCase):
 class RawInputTests(unittest.TestCase):
     def test_capture_uses_native_coordinates_and_restores_original_clip(self):
         raw = RawMouse.__new__(RawMouse)
-        raw.hwnd, raw.closed, raw.clip, raw.old_proc = 7, False, None, None
+        raw.hwnd, raw.closed, raw.clip = 7, False, None
+        raw.collector = Mock()
         raw.user = Mock()
         raw.user.GetForegroundWindow.return_value = 200
         raw.user.GetAncestor.return_value = 200
@@ -137,7 +148,7 @@ class RawInputTests(unittest.TestCase):
         raw.close()
         self.assertEqual(rectangles[-1], (-1920, 0, 1920, 1080))
         raw.close()
-        raw.user.RegisterRawInputDevices.assert_called_once()
+        raw.collector.close.assert_called_once()
 
     def test_native_registration_and_restore_without_cursor_capture(self):
         root = tk.Tk()
@@ -146,16 +157,48 @@ class RawInputTests(unittest.TestCase):
         root.update_idletasks()
         raw = RawMouse(root.winfo_id())
         self.addCleanup(raw.close)
-        self.assertIsNotNone(raw.old_proc)
+        self.assertIsNotNone(raw.collector.window)
+        self.assertTrue(raw.collector.thread.is_alive())
+        self.assertNotEqual(raw.collector.thread.ident, threading.get_ident())
         raw.close()
         raw.close()
-        self.assertIsNone(raw.old_proc)
+        self.assertIsNone(raw.collector.window)
+        self.assertFalse(raw.collector.thread.is_alive())
+
+    def test_private_message_queue_runs_without_tk_pumping(self):
+        root = tk.Tk()
+        root.withdraw()
+        self.addCleanup(root.destroy)
+        root.update_idletasks()
+        received = threading.Event()
+        receiver_threads = []
+        original = RawMouse._receive
+        def receive(raw, hwnd, message, param, handle):
+            if message == 0x8001:
+                receiver_threads.append(threading.get_ident())
+                received.set()
+            return original(raw, hwnd, message, param, handle)
+        with patch.object(RawMouse, '_receive', receive):
+            raw = RawMouse(root.winfo_id())
+        self.addCleanup(raw.close)
+        from ctypes import wintypes as W
+        raw.user.PostMessageW.argtypes = [W.HWND, W.UINT, W.WPARAM, W.LPARAM]
+        raw.user.PostMessageW.restype = W.BOOL
+        self.assertTrue(raw.user.PostMessageW(raw.collector.window, 0x8001, 0, 0))
+        self.assertTrue(received.wait(1))
+        self.assertEqual(receiver_threads, [raw.collector.thread.ident])
 
     def test_raw_packet_signed_counts_and_absolute_device_error(self):
         self.assertEqual(ctypes.sizeof(Mouse), 24)
         raw = RawMouse.__new__(RawMouse)
         raw.user = Mock()
-        raw.old_proc = 123
+        raw.hwnd = 7
+        raw.lock = threading.Lock()
+        raw.packets = 0
+        raw.last_packet = raw.pending_since = None
+        raw.consumed_age_ms = 0
+        raw.user.GetForegroundWindow.return_value = 200
+        raw.user.GetAncestor.return_value = 200
         raw.closed = False
         raw.dx = raw.dy = 0
         raw.error = None
@@ -169,6 +212,15 @@ class RawInputTests(unittest.TestCase):
         raw._receive(1, 0xFF, 0, 123)
         self.assertEqual(raw.take(), (-17, 9))
         self.assertEqual(raw.take(), (0, 0))
+        for _ in range(1000):
+            raw._receive(1, 0xFF, 0, 123)
+        self.assertEqual(raw.take(), (-17000, 9000))
+        self.assertEqual(raw.take(), (0, 0))
+        raw.user.GetForegroundWindow.return_value = 999
+        raw._receive(1, 0xFF, 0, 123)
+        self.assertEqual(raw.take(), (0, 0))
+        self.assertEqual(raw.metrics()[0], 1001)
+        raw.user.GetForegroundWindow.return_value = 200
         def absolute(*args):
             count = fill(*args)
             args[2]._obj.mouse.flags = 1
@@ -244,11 +296,51 @@ class AimUITests(unittest.TestCase):
         self.view.start()
         self.view.after_cancel(self.view.job)
         self.view.job = None
+        self.view.after_cancel(self.view.render_job)
+        self.view.render_job = None
         self.root.update()
         self.assertTrue(self.view.active)
         self.assertEqual(self.view.size(), before)
         self.assertIn("eDPI 800", self.view.status.get())
         self.view.stop()
+
+    def test_input_tick_does_not_render_and_pooled_items_are_reused(self):
+        self.view.start()
+        self.view.after_cancel(self.view.job)
+        self.view.job = None
+        with patch.object(self.view, 'draw') as draw:
+            self.view.tick()
+        draw.assert_not_called()
+        self.view.stop()
+        self.view.draw()
+        before = self.view.canvas.find_all()
+        self.view.camera.yaw += .1
+        self.view.draw()
+        after = self.view.canvas.find_all()
+        self.assertTrue(set(before) <= set(after))
+        self.view.camera.yaw -= .1
+        self.view.draw()
+        self.assertEqual(set(self.view.canvas.find_all()), set(after))
+
+    def test_stop_cancels_both_input_and_render_timers(self):
+        self.view.start()
+        jobs = self.view.job, self.view.render_job
+        self.assertTrue(all(jobs))
+        self.view.stop()
+        pending = self.root.tk.splitlist(self.root.tk.call('after', 'info'))
+        self.assertTrue(all(job not in pending for job in jobs))
+        self.assertIsNone(self.view.render_job)
+
+    def test_timing_overlay_and_status_throttle(self):
+        self.view.start()
+        self.view.timing = (60, 120, 8.3)
+        self.view.toggle_timing()
+        self.view.draw()
+        self.assertIn('60 FPS', self.view.status.get())
+        self.assertIn('120Hz', self.view.status.get())
+        with patch.object(self.view.status, 'set') as set_status:
+            self.view.draw()
+            set_status.assert_not_called()
 
     def test_foreground_loss_and_capture_error_release_input(self):
         for result in (False, OSError("capture failure")):
