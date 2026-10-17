@@ -35,17 +35,53 @@ def focal_length(width, fov):
     return width / (2 * math.tan(math.radians(fov / 2)))
 
 
-def project(target, camera, width, height, fov):
-    yaw = (target[0] - camera[0] + 180) % 360 - 180
-    pitch = target[1] - camera[1]
-    if abs(yaw) >= 89 or abs(pitch) >= 89:
+def dot(a, b):
+    return sum(x * y for x, y in zip(a, b))
+
+
+@dataclass
+class Camera:
+    position: tuple = (0.0, 1.6, -6.0)
+    yaw: float = 0.0
+    pitch: float = 0.0
+
+    def basis(self):
+        yaw, pitch = math.radians(self.yaw), math.radians(self.pitch)
+        sy, cy, sp, cp = math.sin(yaw), math.cos(yaw), math.sin(pitch), math.cos(pitch)
+        return (cy, 0, -sy), (sy * sp, cp, cy * sp), (sy * cp, -sp, cy * cp)
+
+    def local(self, point):
+        delta = tuple(a - b for a, b in zip(point, self.position))
+        return tuple(dot(delta, axis) for axis in self.basis())
+
+    def move(self, forward, right, seconds):
+        yaw = math.radians(self.yaw)
+        distance = 4 * seconds / max(1, math.hypot(forward, right))
+        x, y, z = self.position
+        self.position = (max(-5.5, min(5.5, x + distance * (forward * math.sin(yaw) + right * math.cos(yaw)))),
+                         y, max(-7.5, min(13.5, z + distance * (forward * math.cos(yaw) - right * math.sin(yaw)))))
+
+
+def project(point, camera, width, height, fov):
+    x, y, z = camera.local(point)
+    if z < .05:
         return None
     focal = focal_length(width, fov)
-    return width / 2 + math.tan(math.radians(yaw)) * focal, height / 2 + math.tan(math.radians(pitch)) * focal
+    return width / 2 + focal * x / z, height / 2 - focal * y / z
+
+
+def ray_sphere(origin, direction, center, radius):
+    delta = tuple(a - b for a, b in zip(origin, center))
+    b = dot(delta, direction)
+    discriminant = b * b - dot(delta, delta) + radius * radius
+    if discriminant < 0:
+        return None
+    near, far = -b - math.sqrt(discriminant), -b + math.sqrt(discriminant)
+    return near if near >= 0 else far if far >= 0 else None
 
 
 class AimSession:
-    def __init__(self, duration=60, radius=20, rng=None):
+    def __init__(self, duration=60, radius=.25, rng=None):
         self.duration = duration
         self.radius = radius
         self.rng = rng or random.Random()
@@ -59,29 +95,24 @@ class AimSession:
     def remaining(self, now):
         return self.duration if self.started is None else max(0, self.duration - (now - self.started))
 
-    def start(self, now, width, height):
+    def start(self, now):
         self.started = now
         self.shots = self.hits = 0
         self.reactions = []
-        self.spawn(now, width, height)
+        self.spawn(now)
 
-    def spawn(self, now, width, height):
-        margin = self.radius + 8
-        if width < 2 * margin or height < 2 * margin:
-            self.target = None
-            return
-        self.target = (self.rng.uniform(margin, width - margin),
-                       self.rng.uniform(margin, height - margin))
+    def spawn(self, now):
+        self.target = (self.rng.uniform(-4.5, 4.5), self.rng.uniform(.7, 3.5), self.rng.uniform(1, 11))
         self.target_since = now
 
-    def shoot(self, x, y, now, width, height):
+    def shoot(self, camera, now):
         if self.started is None or not self.remaining(now) or self.target is None:
             return None
         self.shots += 1
-        if math.hypot(x - self.target[0], y - self.target[1]) <= self.radius:
+        if ray_sphere(camera.position, camera.basis()[2], self.target, self.radius) is not None:
             self.hits += 1
             self.reactions.append(max(0, now - self.target_since))
-            self.spawn(now, width, height)
+            self.spawn(now)
             return True
         return False
 

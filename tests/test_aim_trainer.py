@@ -7,7 +7,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from app.games.aim_trainer.model import AimSession, Sensitivity, project
+from app.games.aim_trainer.model import AimSession, Camera, Sensitivity, dot, project, ray_sphere
+from app.games.aim_trainer.scene import render_faces
 from app.games.aim_trainer.raw_mouse import Header, Mouse, Packet, RawMouse
 from app.games.aim_trainer.view import AimTrainer
 from app.palette import ThemeMode
@@ -30,25 +31,72 @@ class AimModelTests(unittest.TestCase):
                 Sensitivity(*args)
 
     def test_projection_center_direction_and_wrap(self):
-        self.assertEqual(project((0, 0), (360, 0), 800, 400, 90), (400, 200))
-        self.assertAlmostEqual(project((45, 0), (0, 0), 800, 400, 90)[0], 800)
-        self.assertLess(project((0, 0), (1, 0), 800, 400, 90)[0], 400)
-        self.assertIsNone(project((180, 0), (0, 0), 800, 400, 90))
+        camera = Camera((0, 0, 0), 360, 0)
+        self.assertAlmostEqual(project((0, 0, 10), camera, 800, 400, 90)[0], 400)
+        self.assertAlmostEqual(project((10, 0, 10), camera, 800, 400, 90)[0], 800)
+        camera.yaw = 1
+        self.assertLess(project((0, 0, 10), camera, 800, 400, 90)[0], 400)
+        self.assertIsNone(project((0, 0, -10), camera, 800, 400, 90))
+
+    def test_camera_rotation_basis_and_true_perspective(self):
+        camera = Camera((0, 0, 0), 35, 23)
+        basis = camera.basis()
+        for axis in basis:
+            self.assertAlmostEqual(dot(axis, axis), 1)
+        self.assertAlmostEqual(dot(basis[0], basis[1]), 0)
+        self.assertAlmostEqual(dot(basis[1], basis[2]), 0)
+        center = project(tuple(10 * value for value in basis[2]), camera, 800, 400, 90)
+        self.assertAlmostEqual(center[0], 400)
+        self.assertAlmostEqual(center[1], 200)
+        camera = Camera((0, 0, 0))
+        near = project((1, 0, 5), camera, 800, 400, 90)[0] - 400
+        far = project((1, 0, 10), camera, 800, 400, 90)[0] - 400
+        self.assertAlmostEqual(near, 2 * far)
+        camera.move(0, 1, .25)
+        self.assertAlmostEqual(project((1, 0, 5), camera, 800, 400, 90)[0], 400)
+
+    def test_ray_sphere_hit_miss_behind_and_inside(self):
+        self.assertEqual(ray_sphere((0, 0, 0), (0, 0, 1), (0, 0, 5), 1), 4)
+        self.assertIsNone(ray_sphere((0, 0, 0), (0, 0, 1), (2, 0, 5), 1))
+        self.assertIsNone(ray_sphere((0, 0, 0), (0, 0, 1), (0, 0, -5), 1))
+        self.assertEqual(ray_sphere((0, 0, 0), (0, 0, 1), (0, 0, 0), 1), 1)
+
+    def test_render_clips_frustum_for_full_camera_rotation(self):
+        for yaw, pitch in ((0, 0), (90, 0), (180, 0), (270, 0), (45, 80), (45, -80)):
+            camera = Camera(yaw=yaw, pitch=pitch)
+            faces = render_faces(camera, (0, 1.6, 5), .25, 800, 400, 90)
+            self.assertTrue(faces)
+            for depth, points, color in faces:
+                self.assertGreaterEqual(depth, .049)
+                for x, y in points:
+                    self.assertTrue(-.001 <= x <= 800.001 and -.001 <= y <= 400.001)
+
+    def test_wasd_normalizes_diagonal_and_respects_room_bounds(self):
+        camera = Camera()
+        start = camera.position
+        camera.move(1, 1, 1)
+        self.assertAlmostEqual(math.dist(start, camera.position), 4)
+        camera.move(1, 0, 100)
+        self.assertEqual(camera.position[2], 13.5)
 
     def test_targets_hits_misses_timing_and_restart(self):
-        session = AimSession(30, 20, random.Random(3))
-        self.assertIsNone(session.shoot(0, 0, 0, 800, 400))
-        session.start(100, 800, 400)
+        session = AimSession(30, .25, random.Random(3))
+        camera = Camera()
+        self.assertIsNone(session.shoot(camera, 0))
+        session.start(100)
         for _ in range(40):
-            x, y = session.target
-            self.assertTrue(28 <= x <= 772 and 28 <= y <= 372)
-            session.spawn(100, 800, 400)
-        self.assertFalse(session.shoot(-100, -100, 100.1, 800, 400))
-        self.assertTrue(session.shoot(*session.target, 100.5, 800, 400))
+            x, y, z = session.target
+            self.assertTrue(-4.5 <= x <= 4.5 and .7 <= y <= 3.5 and 1 <= z <= 11)
+            session.spawn(100)
+        session.target = (0, 1.6, 4)
+        camera.yaw = 90
+        self.assertFalse(session.shoot(camera, 100.1))
+        camera.yaw = 0
+        self.assertTrue(session.shoot(camera, 100.5))
         self.assertEqual((session.hits, session.shots, session.accuracy), (1, 2, 50))
         self.assertAlmostEqual(session.reaction_ms, 500)
-        self.assertIsNone(session.shoot(*session.target, 130, 800, 400))
-        session.start(150, 800, 400)
+        self.assertIsNone(session.shoot(camera, 130))
+        session.start(150)
         self.assertEqual((session.hits, session.shots, session.reaction_ms), (0, 0, 0))
 
 
@@ -154,8 +202,9 @@ class AimUITests(unittest.TestCase):
     def test_start_hit_stop_and_destroy_release_input_and_timer(self):
         self.view.start()
         self.assertTrue(self.view.active)
+        self.assertTrue(self.view.canvas.find_withtag('world3d'))
         self.assertEqual(self.view.settings.dpi * self.view.settings.sensitivity, 800)
-        self.view.world_target = tuple(self.view.camera)
+        self.view.session.target = (0, 1.6, 4)
         self.view.shoot()
         self.assertEqual((self.view.session.hits, self.view.session.shots), (1, 1))
         job = self.view.job
@@ -193,6 +242,8 @@ class AimUITests(unittest.TestCase):
         self.root.update()
         before = self.view.size()
         self.view.start()
+        self.view.after_cancel(self.view.job)
+        self.view.job = None
         self.root.update()
         self.assertTrue(self.view.active)
         self.assertEqual(self.view.size(), before)
