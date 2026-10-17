@@ -324,6 +324,10 @@ def build_updates(parent, app):
     status = page.note(body, "")
     status.configure(textvariable=app.updater.status)
     page.note(body, "업데이트 후에도 사용자 설정과 저장 파일은 유지됩니다.")
+    body = page.card("이전 버전", "공개된 이전 정식 버전을 선택해 설치합니다.")
+    page.note(body, "다운그레이드하면 데이터가 사라지거나 손상될 수 있습니다. 중요한 설정과 저장 파일을 먼저 백업하세요.")
+    RoundedButton(body, "이전 버전 선택…", app.updater.load_previous_versions,
+                  page.colors, compact=True).pack(fill="x", pady=4)
     return page.finish()
 
 

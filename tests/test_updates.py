@@ -52,6 +52,31 @@ class UpdateTests(unittest.TestCase):
         with patch.object(service, "read_json", side_effect=[release, manifest]), self.assertRaises(ValueError):
             service.check_latest("2.0.1")
 
+    def test_previous_versions_filter_sort_and_paginate(self):
+        metadata, _ = self.metadata()
+        def release(tag, **extra):
+            return dict(metadata, tag_name=tag, **extra)
+        first = [release("v2.0.1")] * 30
+        second = [release("v2.0.2"), release("v2.0.3"), release("v2.0.4"),
+                  release("v1.0.0", prerelease=True), release("v0.9.0", draft=True),
+                  release("invalid"), release("v0.8.0", assets=[])]
+        with patch.object(service, "read_json_value", side_effect=[first, second]) as read:
+            self.assertEqual(service.previous_versions("2.0.3"), ["2.0.2", "2.0.1"])
+        self.assertIn("page=2", read.call_args.args[0])
+
+    def test_selected_old_release_is_validated_and_latest_never_downgrades(self):
+        release, manifest = self.metadata()
+        with patch.object(service, "read_json", side_effect=[release, manifest]):
+            self.assertEqual(service.check_previous("2.0.2", "2.0.3"), replace(self.release, page_url=f"https://github.com/{service.REPOSITORY}/releases/tag/v2.0.2"))
+        for version in ("2.0.3", "2.0.4", "../bad"):
+            with self.assertRaises(ValueError):
+                service.check_previous(version, "2.0.3")
+        with patch.object(service, "read_json", return_value=dict(release, tag_name="v2.0.1")), self.assertRaises(ValueError):
+            service.check_previous("2.0.2", "2.0.3")
+        manifest["sha256"] = "invalid"
+        with patch.object(service, "read_json", side_effect=[release, manifest]), self.assertRaises(ValueError):
+            service.check_previous("2.0.2", "2.0.3")
+
     def test_missing_assets_and_external_url_rejected(self):
         release, manifest = self.metadata()
         release["assets"][0]["browser_download_url"] = "https://example.com/evil.exe"
@@ -59,6 +84,13 @@ class UpdateTests(unittest.TestCase):
             service.check_latest("2.0.1")
         with patch.object(service, "urllib") as request, self.assertRaises(ValueError):
             service.open_response("http://github.com/unsafe")
+
+    def test_release_list_requests_github_json(self):
+        response = Mock()
+        response.geturl.return_value = f"https://api.github.com/repos/{service.REPOSITORY}/releases"
+        with patch.object(service.urllib.request, "urlopen", return_value=response) as open_url:
+            service.open_response(response.geturl())
+        self.assertEqual(open_url.call_args.args[0].get_header("Accept"), "application/vnd.github+json")
 
     def test_no_release_and_prerelease_ignored(self):
         with patch.object(service, "read_json", side_effect=HTTPError(service.API_URL, 404, "not found", {}, None)):
@@ -152,3 +184,45 @@ class UpdateUITests(unittest.TestCase):
             self.controller.poll()
         launch.assert_called_once()
         self.root._close_app.assert_called_once()
+
+    def test_downgrade_decline_does_not_fetch_or_close(self):
+        dialog = Mock()
+        with patch("app.update_ui.messagebox.askyesno", return_value=False) as prompt, patch("app.update_ui.check_previous") as check:
+            self.controller.downgrade("2.0.2", dialog)
+        self.assertEqual(prompt.call_args.kwargs["default"], "no")
+        self.assertIn("데이터가 사라지거나 손상", prompt.call_args.args[1])
+        check.assert_not_called()
+        dialog.destroy.assert_not_called()
+        self.root._close_app.assert_not_called()
+
+    def test_version_selection_contains_old_versions_and_warning(self):
+        self.controller.show_previous_versions(["2.0.2", "2.0.1"])
+        dialog = next(widget for widget in self.root.winfo_children() if isinstance(widget, tk.Toplevel))
+        widgets = dialog.winfo_children()[0].winfo_children()
+        combo = next(widget for widget in widgets if widget.winfo_class() == "TCombobox")
+        self.assertEqual(combo.get(), "2.0.2")
+        self.assertEqual(str(combo.cget("state")), "readonly")
+        self.assertTrue(any("데이터가 사라지거나 손상" in str(widget.cget("text")) for widget in widgets if widget.winfo_class() == "TLabel"))
+        dialog.destroy()
+
+    def test_confirmed_downgrade_fetches_selected_version_in_worker(self):
+        dialog = Mock()
+        release = SimpleNamespace(version="2.0.2")
+        with patch("app.update_ui.messagebox.askyesno", return_value=True), patch("app.update_ui.check_previous", return_value=release) as check, patch("app.update_ui.threading.Thread") as thread:
+            thread.side_effect = lambda **kwargs: SimpleNamespace(start=kwargs["target"])
+            self.controller.downgrade("2.0.2", dialog)
+        check.assert_called_once_with("2.0.2")
+        dialog.destroy.assert_called_once()
+        self.assertEqual(self.controller.events.get_nowait(), ("previous", release, True))
+        self.root._close_app.assert_not_called()
+
+    def test_previous_verified_release_download_or_source_page(self):
+        release = SimpleNamespace(version="2.0.2", page_url="https://github.com/example")
+        self.controller.events.put(("previous", release, True))
+        with patch("app.update_ui.sys.frozen", True, create=True), patch.object(self.controller, "download") as download:
+            self.controller.poll()
+        download.assert_called_once_with(release)
+        self.controller.events.put(("previous", release, True))
+        with patch("app.update_ui.sys.frozen", False, create=True), patch("app.update_ui.webbrowser.open") as browser:
+            self.controller.poll()
+        browser.assert_called_once_with(release.page_url)

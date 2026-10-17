@@ -31,7 +31,7 @@ def open_response(url: str):
     parsed = urlparse(url)
     if parsed.scheme != "https" or parsed.hostname not in ALLOWED_HOSTS or parsed.username or parsed.password:
         raise ValueError("허용되지 않은 업데이트 주소입니다.")
-    request = urllib.request.Request(url, headers={"User-Agent": f"seoul2line-Toolbox/{VERSION}", "Accept": "application/json" if url == API_URL else "application/octet-stream"})
+    request = urllib.request.Request(url, headers={"User-Agent": f"seoul2line-Toolbox/{VERSION}", "Accept": "application/vnd.github+json" if parsed.hostname == "api.github.com" else "application/octet-stream"})
     response = urllib.request.urlopen(request, timeout=30)
     final = urlparse(response.geturl())
     if final.scheme != "https" or final.hostname not in ALLOWED_HOSTS:
@@ -40,12 +40,16 @@ def open_response(url: str):
     return response
 
 
-def read_json(url: str) -> dict:
+def read_json_value(url: str):
     with open_response(url) as response:
         raw = response.read(1024 * 1024 + 1)
     if len(raw) > 1024 * 1024:
         raise ValueError("업데이트 정보가 너무 큽니다.")
-    result = json.loads(raw.decode("utf-8-sig"))
+    return json.loads(raw.decode("utf-8-sig"))
+
+
+def read_json(url: str) -> dict:
+    result = read_json_value(url)
     if not isinstance(result, dict):
         raise ValueError("업데이트 정보 형식이 잘못되었습니다.")
     return result
@@ -70,6 +74,44 @@ def check_latest(current: str = VERSION) -> Release | None:
     tag = release.get("tag_name", "")
     if release.get("draft") or release.get("prerelease") or version_tuple(tag) <= version_tuple(current):
         return None
+    return validate_release(release)
+
+
+def previous_versions(current: str = VERSION) -> list[str]:
+    versions = set()
+    for page in range(1, 11):
+        items = read_json_value(f"https://api.github.com/repos/{REPOSITORY}/releases?per_page=30&page={page}")
+        if not isinstance(items, list):
+            raise ValueError("이전 버전 목록 형식이 잘못되었습니다.")
+        for item in items:
+            if not isinstance(item, dict) or item.get("draft") or item.get("prerelease"):
+                continue
+            tag = item.get("tag_name", "")
+            try:
+                older = version_tuple(tag) < version_tuple(current)
+            except ValueError:
+                continue
+            names = {asset.get("name") for asset in item.get("assets", []) if isinstance(asset, dict)}
+            if older and tag.startswith("v") and {INSTALLER_NAME, "update.json"} <= names:
+                versions.add(tag.removeprefix("v"))
+        if len(items) < 30:
+            break
+    return sorted(versions, key=version_tuple, reverse=True)
+
+
+def check_previous(version: str, current: str = VERSION) -> Release:
+    if version_tuple(version) >= version_tuple(current):
+        raise ValueError("현재 버전보다 이전 버전만 선택할 수 있습니다.")
+    version = version.removeprefix("v")
+    release = read_json(f"https://api.github.com/repos/{REPOSITORY}/releases/tags/v{version}")
+    if release.get("tag_name") != f"v{version}" or release.get("draft") or release.get("prerelease"):
+        raise ValueError("선택한 정식 릴리즈를 확인할 수 없습니다.")
+    return validate_release(release)
+
+
+def validate_release(release: dict) -> Release:
+    tag = release.get("tag_name", "")
+    version_tuple(tag)
     base = f"https://github.com/{REPOSITORY}/releases/download/{tag}/"
     assets = {item["name"]: item for item in release.get("assets", [])}
     for name in (INSTALLER_NAME, "update.json"):
