@@ -11,6 +11,7 @@ import numpy as np
 TOOL_ICONS = {
     'home.overview': 'grid', 'home.system_monitor': 'monitor',
     'gaming.launchers': 'play', 'gaming.music': 'music', 'gaming.workspace_presets': 'briefcase',
+    'gaming.aim_trainer': 'crosshair',
     'developer.minecraft_commands': 'cube', 'developer.code_editor': 'code',
     'developer.git': 'git', 'developer.terminal': 'terminal',
     'developer.utilities': 'convert', 'developer.scratchpad': 'notebook',
@@ -95,7 +96,13 @@ def icon(canvas, name, x, y, size, color, *, width=2, tags='icon'):
         canvas.create_oval(x + a * size, y + b * size, x + c * size, y + d * size,
                           outline=color, width=width, tags=tags)
 
-    if name == 'search':
+    if name == 'crosshair':
+        oval(.2, .2, .8, .8)
+        line(.5, .02, .5, .36)
+        line(.5, .64, .5, .98)
+        line(.02, .5, .36, .5)
+        line(.64, .5, .98, .5)
+    elif name == 'search':
         oval(.12, .08, .7, .66)
         line(.65, .63, .91, .91)
     elif name == 'monitor':

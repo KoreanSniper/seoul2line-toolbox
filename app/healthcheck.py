@@ -14,6 +14,7 @@ def run(report_path: str) -> int:
         from app.version import VERSION
         from app.tools.system_monitor import SystemMonitor
         from app.games.trsim.view import RailPanic
+        from app.games.aim_trainer.view import AimTrainer
         app = Seoul2LineToolbox()
         app.withdraw()
         app.updater.close()
@@ -42,6 +43,14 @@ def run(report_path: str) -> int:
         app.show_section('설정')
         app.update_idletasks()
         assert not trsim_view.winfo_exists() and trsim_view._tick_job is None
+        aim = next(tool for tool in app.registry.tools_for('게임') if tool.id == 'gaming.aim_trainer')
+        app.show_tool(aim)
+        app.update_idletasks()
+        aim_view = next(widget for widget in descendants(app.workspace) if isinstance(widget, AimTrainer))
+        assert aim_view.fields['dpi'].get() == '800' and not aim_view.active
+        app.show_section('설정')
+        app.update_idletasks()
+        assert not aim_view.winfo_exists() and aim_view.raw is None and aim_view.job is None
         tools = [tool.id for section in app.registry.sections() for tool in app.registry.tools_for(section)]
         assert "minigame.micro_warfare" in tools and "minigame.orbit_lab" in tools
         assert not [plugin.error for plugin in app.plugin_manager.plugins if plugin.error]
@@ -53,7 +62,7 @@ def run(report_path: str) -> int:
                 'automation.editor', 'automation.history', 'automation.manager'}
             assert all(tool.plugin_id == 'automation_tools' for tool in automation_tools)
         report.update(ok=True, version=VERSION, tool_count=len(tools), data_directory=str(APP_DIR),
-                      plugins=[plugin.id for plugin in app.plugin_manager.plugins], checked_tools=["settings.preferences", "home.system_monitor", "minigame.trsim"])
+                      plugins=[plugin.id for plugin in app.plugin_manager.plugins], checked_tools=["settings.preferences", "home.system_monitor", "minigame.trsim", "gaming.aim_trainer"])
     except Exception:
         report["error"] = traceback.format_exc()
     finally:
