@@ -24,11 +24,9 @@ class LanRemoteTool(tk.Frame):
         super().__init__(parent, bg=self.colors['panel'])
         self.app = app
         config = getattr(app, 'config_store', None)
-        saved_endpoint = config.get('cloudflare_transfer', 'endpoint', default='') if config else ''
-        endpoint = saved_endpoint.strip() if isinstance(saved_endpoint, str) else ''
-        self.endpoint = tk.StringVar(value=endpoint or DEFAULT_ENDPOINT)
-        self.nickname = tk.StringVar(value=config.get('cloudflare_transfer', 'name', default='나') if config else '나')
-        self.token = tk.StringVar(value=DEFAULT_SERVICE_TOKEN if self.endpoint.get().rstrip('/') == DEFAULT_ENDPOINT else '')
+        saved_name = config.get('cloudflare_transfer', 'name', default='나') if config else '나'
+        nickname = saved_name.strip() if isinstance(saved_name, str) else ''
+        self.nickname = tk.StringVar(value=nickname if 1 <= len(nickname) <= 40 else '나')
         self.room = tk.StringVar()
         self.message = tk.StringVar()
         self.status = tk.StringVar(value='●  서버 미연결')
@@ -93,8 +91,8 @@ class LanRemoteTool(tk.Frame):
         self._button(room.body, '복사', self.copy_room).grid(row=0, column=2, padx=5)
         self._button(room.body, '새 방 만들기', lambda: self.connect(True), True).grid(row=0, column=3, padx=5)
         self._button(room.body, '방 참가', lambda: self.connect(False)).grid(row=0, column=4, padx=5)
-        self.options_button = self._button(room.body, '⚙ 연결 옵션', self.options)
-        self.options_button.grid(row=0, column=5, padx=(5, 0))
+        self.user_settings_button = self._button(room.body, '⚙ 유저 설정', self.user_settings)
+        self.user_settings_button.grid(row=0, column=5, padx=(5, 0))
 
         self.content = tk.Frame(self, bg=c['panel'])
         self.content.grid(row=3, column=0, sticky='nsew', padx=18, pady=(0, 14))
@@ -172,9 +170,7 @@ class LanRemoteTool(tk.Frame):
         self._label(right, '파일당 25 MiB · 방당 총 100 MiB · 24시간 후 삭제').grid(row=4, column=0, sticky='w')
         self._label(right, 'HTTPS 전송 · 방 코드는 신뢰하는 사람에게만 공유하세요.').grid(row=5, column=0, sticky='w', pady=(4, 0))
         self.bind('<Configure>', self._resize)
-        greeting = ('기본 서버가 설정되어 있습니다. 새 방을 만들거나 전달받은 방 코드로 참가하세요.'
-                    if self.token.get() else '연결 옵션에서 서버 인증 토큰을 입력한 뒤 방에 연결하세요.')
-        self._chat('안내', greeting, False)
+        self._chat('안내', '새 방을 만들거나 전달받은 방 코드로 참가하세요. 닉네임은 유저 설정에서 변경할 수 있습니다.', False)
 
     def _resize(self, event):
         if event.widget != self:
@@ -222,38 +218,48 @@ class LanRemoteTool(tk.Frame):
             self.file_panel.focus_set()
             self.filter_files('전체')
 
-    def options(self):
-        if getattr(self, 'options_window', None) and self.options_window.winfo_exists():
-            self.options_window.lift()
+    def user_settings(self):
+        if getattr(self, 'user_settings_window', None) and self.user_settings_window.winfo_exists():
+            self.user_settings_window.lift()
             return
         window = tk.Toplevel(self)
-        self.options_window = window
-        window.title('Cloudflare 연결 옵션')
+        self.user_settings_window = window
+        window.title('유저 설정')
         window.configure(bg=self.colors['surface'])
         window.transient(self.winfo_toplevel())
         window.columnconfigure(0, weight=1)
-        for row, (label, variable, secret) in enumerate((('Workers 서버 주소 (https://…workers.dev)', self.endpoint, False), ('서버 인증 토큰 (SERVICE_TOKEN)', self.token, True), ('채팅 표시 이름', self.nickname, False))):
-            self._label(window, label).grid(row=row * 2, column=0, sticky='w', padx=18, pady=(12, 4))
-            self._entry(window, variable, width=55, show='•' if secret else '').grid(row=row * 2 + 1, column=0, sticky='ew', padx=18, ipady=8)
-        self._label(window, '기본 서버 접속 키는 앱에 포함됩니다. 방 코드는 별도로 공유하세요.').grid(row=6, column=0, padx=18, pady=12)
+        self._label(window, '닉네임').grid(row=0, column=0, sticky='w', padx=18, pady=(16, 6))
+        self.nickname_draft = tk.StringVar(value=self.nickname.get())
+        self.nickname_entry = self._entry(window, self.nickname_draft, width=36)
+        self.nickname_entry.grid(row=1, column=0, sticky='ew', padx=18, ipady=8)
+        self.nickname_entry.bind('<Return>', lambda _: self._save_user_settings(window))
+        self.nickname_entry.focus_set()
+        self._label(window, '채팅에 표시할 이름을 1~40자로 입력하세요.').grid(row=2, column=0, sticky='w', padx=18, pady=(8, 0))
+        self.user_settings_error = tk.StringVar()
+        error = self._label(window, variable=self.user_settings_error, wraplength=320, anchor='w', justify='left')
+        error.configure(fg=self.colors['danger'])
+        error.grid(row=3, column=0, sticky='ew', padx=18, pady=(6, 8))
         actions = tk.Frame(window, bg=self.colors['surface'])
-        actions.grid(row=7, column=0, sticky='ew', padx=18, pady=(0, 16))
-        self._button(actions, '기본 서버 복원', self._restore_defaults).pack(side='left')
-        self._button(actions, '적용', lambda: self._save_options(window), True).pack(side='right')
+        actions.grid(row=4, column=0, sticky='ew', padx=18, pady=(0, 16))
+        self._button(actions, '취소', window.destroy).pack(side='left')
+        self._button(actions, '저장', lambda: self._save_user_settings(window), True).pack(side='right')
 
-    def _restore_defaults(self):
-        self.endpoint.set(DEFAULT_ENDPOINT)
-        self.token.set(DEFAULT_SERVICE_TOKEN)
-
-    def _save_options(self, window):
-        try:
-            TransferClient(self.endpoint.get(), self.token.get(), self.nickname.get())
-        except (ValueError, TransferError) as exc:
-            self._log(str(exc))
+    def _save_user_settings(self, window):
+        nickname = self.nickname_draft.get().strip()
+        if not 1 <= len(nickname) <= 40:
+            self.user_settings_error.set('닉네임을 1~40자로 입력하세요.')
+            self.nickname_entry.focus_set()
             return
         config = getattr(self.app, 'config_store', None)
-        if config:
-            config.set_many({('cloudflare_transfer', 'endpoint'): self.endpoint.get().strip(), ('cloudflare_transfer', 'name'): self.nickname.get().strip()})
+        try:
+            if config:
+                config.set_many({('cloudflare_transfer', 'name'): nickname})
+        except OSError:
+            self.user_settings_error.set('설정을 저장하지 못했습니다. 다시 시도하세요.')
+            return
+        self.nickname.set(nickname)
+        if self.client:
+            self.client.name = nickname
         window.destroy()
 
     def copy_room(self):
@@ -276,13 +282,13 @@ class LanRemoteTool(tk.Frame):
         if self.connecting:
             return
         try:
-            client = TransferClient(self.endpoint.get(), self.token.get(), self.nickname.get())
+            client = TransferClient(DEFAULT_ENDPOINT, DEFAULT_SERVICE_TOKEN, self.nickname.get())
             invitation = self.room.get().strip()
             if not create:
                 client._set_room(invitation)
         except (ValueError, TransferError) as exc:
             self._log(str(exc))
-            self.options()
+            self._chat('연결 안내', str(exc), False)
             return
         self.stop()
         for child in self.chat_body.winfo_children():
@@ -503,8 +509,8 @@ class LanRemoteTool(tk.Frame):
         self.closed = True
         self.stop()
         self.after_cancel(self.timer)
-        if getattr(self, 'options_window', None) and self.options_window.winfo_exists():
-            self.options_window.destroy()
+        if getattr(self, 'user_settings_window', None) and self.user_settings_window.winfo_exists():
+            self.user_settings_window.destroy()
         super().destroy()
 
 

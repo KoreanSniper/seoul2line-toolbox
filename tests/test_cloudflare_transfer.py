@@ -1,6 +1,7 @@
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import tkinter as tk
 import unittest
@@ -133,12 +134,12 @@ class CloudflareViewTests(unittest.TestCase):
         self.assertGreater(self.view.chat_panel.winfo_width(), self.view.file_panel.winfo_width())
         self.assertGreater(self.view.message_entry.winfo_width(), 100)
         self.assertGreater(self.view.room_entry.winfo_width(), 100)
-        self.assertLess(self.view.options_button.winfo_rootx() + self.view.options_button.winfo_width(), self.root.winfo_rootx() + self.root.winfo_width())
+        self.assertLess(self.view.user_settings_button.winfo_rootx() + self.view.user_settings_button.winfo_width(), self.root.winfo_rootx() + self.root.winfo_width())
         self.root.geometry('880x820')
         self.root.update()
         self.assertEqual(self.view.file_panel.grid_info()['row'], 1)
         self.assertGreater(self.view.message_entry.winfo_width(), 100)
-        self.assertLess(self.view.options_button.winfo_rootx() + self.view.options_button.winfo_width(), self.root.winfo_rootx() + self.root.winfo_width())
+        self.assertLess(self.view.user_settings_button.winfo_rootx() + self.view.user_settings_button.winfo_width(), self.root.winfo_rootx() + self.root.winfo_width())
         self.assertFalse(self.errors)
 
     def test_stale_events_ignored_after_disconnect(self):
@@ -161,10 +162,10 @@ class CloudflareViewTests(unittest.TestCase):
         self.view._log('test record')
         self.assertIn('test record', self.view.history.get('1.0', 'end'))
 
-    def test_options_and_themes(self):
-        self.view.options()
+    def test_user_settings_and_themes(self):
+        self.view.user_settings()
         self.root.update()
-        self.assertTrue(self.view.options_window.winfo_exists())
+        self.assertTrue(self.view.user_settings_window.winfo_exists())
         for theme in (ThemeMode.LIGHT, ThemeMode.GREEN):
             other = LanRemoteTool(self.root, SimpleNamespace(dark_mode=theme))
             other.destroy()
@@ -175,30 +176,53 @@ class CloudflareViewTests(unittest.TestCase):
             self.view.show_tab('files')
             picker.assert_not_called()
 
-    def test_default_server_restore_and_options_save_excludes_token(self):
-        self.assertEqual(self.view.endpoint.get(), DEFAULT_ENDPOINT)
-        self.assertEqual(self.view.token.get(), DEFAULT_SERVICE_TOKEN)
-        self.view.endpoint.set('https://custom.example')
-        self.view.token.set('custom-key')
-        self.view._restore_defaults()
-        self.view.options()
-        self.app.config_store = SimpleNamespace(set_many=lambda values: saved.update(values))
+    def test_nickname_save_updates_active_client_and_only_persists_name(self):
         saved = {}
-        self.view._save_options(self.view.options_window)
-        self.assertEqual(set(saved), {('cloudflare_transfer', 'endpoint'), ('cloudflare_transfer', 'name')})
-        self.assertEqual(saved[('cloudflare_transfer', 'endpoint')], DEFAULT_ENDPOINT)
-        self.assertEqual(self.view.token.get(), DEFAULT_SERVICE_TOKEN)
+        self.app.config_store = SimpleNamespace(set_many=lambda values: saved.update(values))
+        self.view.client = SimpleNamespace(name='old', cancel=threading.Event())
+        self.view.user_settings()
+        self.view.nickname_draft.set('  민지  ')
+        self.view._save_user_settings(self.view.user_settings_window)
+        self.assertEqual(saved, {('cloudflare_transfer', 'name'): '민지'})
+        self.assertEqual(self.view.nickname.get(), '민지')
+        self.assertEqual(self.view.client.name, '민지')
+        self.assertFalse(self.view.user_settings_window.winfo_exists())
 
-    def test_saved_custom_endpoint_never_receives_builtin_key(self):
-        for endpoint, expected_key in [('https://custom.example', ''), ('', DEFAULT_SERVICE_TOKEN), ('  ', DEFAULT_SERVICE_TOKEN), (None, DEFAULT_SERVICE_TOKEN), (DEFAULT_ENDPOINT + '/', DEFAULT_SERVICE_TOKEN)]:
-            config = AppConfig()
-            config.data['cloudflare_transfer'] = {'endpoint': endpoint}
-            other = LanRemoteTool(self.root, SimpleNamespace(dark_mode=ThemeMode.DARK, config_store=config))
-            try:
-                self.assertEqual(other.token.get(), expected_key)
-                self.assertTrue(other.endpoint.get())
-            finally:
-                other.destroy()
+    def test_nickname_invalid_or_cancelled_edits_do_not_apply(self):
+        original = self.view.nickname.get()
+        self.view.user_settings()
+        for invalid in ('  ', 'x' * 41):
+            self.view.nickname_draft.set(invalid)
+            self.view._save_user_settings(self.view.user_settings_window)
+            self.assertTrue(self.view.user_settings_window.winfo_exists())
+            self.assertTrue(self.view.user_settings_error.get())
+            self.assertEqual(self.view.nickname.get(), original)
+        self.view.nickname_draft.set('unsaved')
+        self.view.user_settings_window.destroy()
+        self.assertEqual(self.view.nickname.get(), original)
+
+    def test_user_settings_only_has_nickname_input(self):
+        self.view.user_settings()
+        def children(widget):
+            for child in widget.winfo_children():
+                yield child
+                yield from children(child)
+        inputs = [w for w in children(self.view.user_settings_window) if isinstance(w, tk.Entry)]
+        self.assertEqual(inputs, [self.view.nickname_entry])
+        self.assertEqual(self.view.user_settings_window.title(), '유저 설정')
+        self.assertIn('유저 설정', self.view.user_settings_button.text)
+
+    def test_old_endpoint_settings_are_ignored_when_connecting(self):
+        config = AppConfig()
+        config.data['cloudflare_transfer'] = {'endpoint': 'https://old.example', 'name': 'Alex'}
+        other = LanRemoteTool(self.root, SimpleNamespace(dark_mode=ThemeMode.DARK, config_store=config))
+        try:
+            other._work = lambda *_args, **_kwargs: None
+            with patch('app.tools.network_lan_remote.TransferClient', wraps=TransferClient) as client:
+                other.connect(True)
+                client.assert_called_once_with(DEFAULT_ENDPOINT, DEFAULT_SERVICE_TOKEN, 'Alex')
+        finally:
+            other.destroy()
 
 
 if __name__ == '__main__':
