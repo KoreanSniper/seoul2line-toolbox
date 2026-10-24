@@ -10,7 +10,9 @@ from tkinter import filedialog, ttk
 from tkinter import font as tkfont
 
 from app.palette import palette
-from app.services.cloudflare_transfer import TransferClient, TransferError
+from app.services.cloudflare_transfer import (
+    DEFAULT_ENDPOINT, DEFAULT_SERVICE_TOKEN, TransferClient, TransferError,
+)
 from app.tool_registry import ToolSpec
 from app.ui import RoundedButton, RoundedFrame
 
@@ -22,9 +24,11 @@ class LanRemoteTool(tk.Frame):
         super().__init__(parent, bg=self.colors['panel'])
         self.app = app
         config = getattr(app, 'config_store', None)
-        self.endpoint = tk.StringVar(value=config.get('cloudflare_transfer', 'endpoint', default='') if config else '')
+        saved_endpoint = config.get('cloudflare_transfer', 'endpoint', default='') if config else ''
+        endpoint = saved_endpoint.strip() if isinstance(saved_endpoint, str) else ''
+        self.endpoint = tk.StringVar(value=endpoint or DEFAULT_ENDPOINT)
         self.nickname = tk.StringVar(value=config.get('cloudflare_transfer', 'name', default='나') if config else '나')
-        self.token = tk.StringVar()
+        self.token = tk.StringVar(value=DEFAULT_SERVICE_TOKEN if self.endpoint.get().rstrip('/') == DEFAULT_ENDPOINT else '')
         self.room = tk.StringVar()
         self.message = tk.StringVar()
         self.status = tk.StringVar(value='●  서버 미연결')
@@ -168,7 +172,9 @@ class LanRemoteTool(tk.Frame):
         self._label(right, '파일당 25 MiB · 방당 총 100 MiB · 24시간 후 삭제').grid(row=4, column=0, sticky='w')
         self._label(right, 'HTTPS 전송 · 방 코드는 신뢰하는 사람에게만 공유하세요.').grid(row=5, column=0, sticky='w', pady=(4, 0))
         self.bind('<Configure>', self._resize)
-        self._chat('안내', '연결 옵션에서 서버 주소와 인증 토큰을 입력한 뒤 새 방을 만들거나 방 코드로 참가하세요.', False)
+        greeting = ('기본 서버가 설정되어 있습니다. 새 방을 만들거나 전달받은 방 코드로 참가하세요.'
+                    if self.token.get() else '연결 옵션에서 서버 인증 토큰을 입력한 뒤 방에 연결하세요.')
+        self._chat('안내', greeting, False)
 
     def _resize(self, event):
         if event.widget != self:
@@ -229,8 +235,15 @@ class LanRemoteTool(tk.Frame):
         for row, (label, variable, secret) in enumerate((('Workers 서버 주소 (https://…workers.dev)', self.endpoint, False), ('서버 인증 토큰 (SERVICE_TOKEN)', self.token, True), ('채팅 표시 이름', self.nickname, False))):
             self._label(window, label).grid(row=row * 2, column=0, sticky='w', padx=18, pady=(12, 4))
             self._entry(window, variable, width=55, show='•' if secret else '').grid(row=row * 2 + 1, column=0, sticky='ew', padx=18, ipady=8)
-        self._label(window, '토큰·방 코드는 디스크에 저장하지 않습니다. 변경 후 다시 연결하세요.').grid(row=6, column=0, padx=18, pady=12)
-        self._button(window, '적용', lambda: self._save_options(window), True).grid(row=7, column=0, sticky='e', padx=18, pady=(0, 16))
+        self._label(window, '기본 서버 접속 키는 앱에 포함됩니다. 방 코드는 별도로 공유하세요.').grid(row=6, column=0, padx=18, pady=12)
+        actions = tk.Frame(window, bg=self.colors['surface'])
+        actions.grid(row=7, column=0, sticky='ew', padx=18, pady=(0, 16))
+        self._button(actions, '기본 서버 복원', self._restore_defaults).pack(side='left')
+        self._button(actions, '적용', lambda: self._save_options(window), True).pack(side='right')
+
+    def _restore_defaults(self):
+        self.endpoint.set(DEFAULT_ENDPOINT)
+        self.token.set(DEFAULT_SERVICE_TOKEN)
 
     def _save_options(self, window):
         try:

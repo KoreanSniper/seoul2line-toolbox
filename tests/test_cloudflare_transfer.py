@@ -9,7 +9,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.palette import ThemeMode
-from app.services.cloudflare_transfer import TransferClient, TransferError
+from app.config import AppConfig
+from app.services.cloudflare_transfer import DEFAULT_ENDPOINT, DEFAULT_SERVICE_TOKEN, TransferClient, TransferError
 from app.tools.network_lan_remote import LanRemoteTool
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -173,6 +174,31 @@ class CloudflareViewTests(unittest.TestCase):
         with patch('app.tools.network_lan_remote.filedialog.askopenfilenames') as picker:
             self.view.show_tab('files')
             picker.assert_not_called()
+
+    def test_default_server_restore_and_options_save_excludes_token(self):
+        self.assertEqual(self.view.endpoint.get(), DEFAULT_ENDPOINT)
+        self.assertEqual(self.view.token.get(), DEFAULT_SERVICE_TOKEN)
+        self.view.endpoint.set('https://custom.example')
+        self.view.token.set('custom-key')
+        self.view._restore_defaults()
+        self.view.options()
+        self.app.config_store = SimpleNamespace(set_many=lambda values: saved.update(values))
+        saved = {}
+        self.view._save_options(self.view.options_window)
+        self.assertEqual(set(saved), {('cloudflare_transfer', 'endpoint'), ('cloudflare_transfer', 'name')})
+        self.assertEqual(saved[('cloudflare_transfer', 'endpoint')], DEFAULT_ENDPOINT)
+        self.assertEqual(self.view.token.get(), DEFAULT_SERVICE_TOKEN)
+
+    def test_saved_custom_endpoint_never_receives_builtin_key(self):
+        for endpoint, expected_key in [('https://custom.example', ''), ('', DEFAULT_SERVICE_TOKEN), ('  ', DEFAULT_SERVICE_TOKEN), (None, DEFAULT_SERVICE_TOKEN), (DEFAULT_ENDPOINT + '/', DEFAULT_SERVICE_TOKEN)]:
+            config = AppConfig()
+            config.data['cloudflare_transfer'] = {'endpoint': endpoint}
+            other = LanRemoteTool(self.root, SimpleNamespace(dark_mode=ThemeMode.DARK, config_store=config))
+            try:
+                self.assertEqual(other.token.get(), expected_key)
+                self.assertTrue(other.endpoint.get())
+            finally:
+                other.destroy()
 
 
 if __name__ == '__main__':

@@ -11,6 +11,10 @@ from pathlib import Path
 from urllib.parse import quote, urlsplit
 
 MAX_FILE = 25 * 1024 * 1024
+# Shared deployment defaults intentionally distributed with the app.
+# This public client key is not a private account credential; room keys remain separate.
+DEFAULT_ENDPOINT = "https://toolbox-chat-transfer.seoul2linejh.workers.dev"
+DEFAULT_SERVICE_TOKEN = "aa144a91-096b-4258-ac3a-aa006b427b12"
 
 
 class TransferError(Exception):
