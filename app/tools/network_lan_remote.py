@@ -165,7 +165,7 @@ class LanRemoteTool(tk.Frame):
         self.files_canvas.bind('<MouseWheel>', lambda e: self.files_canvas.yview_scroll(-int(e.delta / 120), 'units'))
         self._label(self.files_body, '아직 공유된 파일이 없습니다.').pack(pady=20)
         self._button(right, '☁  클릭하여 전송할 파일 선택', self.send_file).grid(row=3, column=0, sticky='ew', pady=(10, 4))
-        self._label(right, '파일당 최대 25 MiB · 방과 파일은 생성 24시간 후 삭제').grid(row=4, column=0, sticky='w')
+        self._label(right, '파일당 25 MiB · 방당 총 100 MiB · 24시간 후 삭제').grid(row=4, column=0, sticky='w')
         self._label(right, 'HTTPS 전송 · 방 코드는 신뢰하는 사람에게만 공유하세요.').grid(row=5, column=0, sticky='w', pady=(4, 0))
         self.bind('<Configure>', self._resize)
         self._chat('안내', '연결 옵션에서 서버 주소와 인증 토큰을 입력한 뒤 새 방을 만들거나 방 코드로 참가하세요.', False)
@@ -316,7 +316,7 @@ class LanRemoteTool(tk.Frame):
                 self.events.put((generation, self._poll_error, failures, str(exc)))
                 if failures >= 3:
                     break
-            if client.cancel.wait(1.5 if failures == 0 else 3):
+            if client.cancel.wait(3):
                 break
 
     def _poll_error(self, failures, error):

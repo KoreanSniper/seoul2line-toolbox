@@ -64,9 +64,9 @@ test('file size, filename and room file quota validation', async () => {
   for (let i = 0; i < 100; i++) h.rooms.get(h.data.id).sql.exec('INSERT INTO files(id, name, size) VALUES (?, ?, ?)', String(i), 'a', 1);
   assert.equal((await put(1, 'a')).status, 429);
 });
-test('R2 failure removes reservation and does not publish a file event', async () => {
+test('storage failure removes reservation and does not publish a file event', async () => {
   const h = await room();
-  h.env.FILES.put = async () => {throw new Error('storage unavailable');};
+  h.rooms.get(h.data.id).storeFile = async () => {throw new Error('storage unavailable');};
   assert.equal((await h.call(`files/${crypto.randomUUID()}`, {method: 'PUT', body: 'a', headers: {'Content-Length': '1', 'X-File-Name': 'a'}})).status, 502);
   assert.equal(h.rooms.get(h.data.id).sql.exec('SELECT * FROM files').toArray().length, 0);
   assert.equal((await (await h.call('events')).json()).events.length, 0);
@@ -78,6 +78,47 @@ test('expiration blocks access and alarm deletes files and room records', async 
   instance.sql.exec("UPDATE meta SET value = '0' WHERE key = 'expires'");
   assert.equal((await h.call('events')).status, 404);
   await instance.alarm();
-  assert.equal(h.objects.size, 0);
+  assert.equal(instance.sql.exec('SELECT * FROM chunks').toArray().length, 0);
   assert.equal(instance.meta('id'), undefined);
+});
+test('multi-chunk binary file roundtrip and chunk size bound', async () => {
+  const h = await room();
+  const id = crypto.randomUUID();
+  const bytes = new Uint8Array(900001);
+  for (let i = 0; i < bytes.length; i++) bytes[i] = i % 251;
+  assert.equal((await h.call(`files/${id}`, {method: 'PUT', body: bytes, headers: {'Content-Length': String(bytes.length), 'X-File-Name': 'binary.bin'}})).status, 200);
+  const chunks = h.rooms.get(h.data.id).sql.exec('SELECT length(bytes) AS n FROM chunks').toArray();
+  assert.equal(chunks.length, 4);
+  assert.ok(chunks.every(row => row.n <= 256 * 1024));
+  assert.deepEqual(new Uint8Array(await (await h.call(`files/${id}`)).arrayBuffer()), bytes);
+});
+test('100 MiB room budget rejects additional files before reading body', async () => {
+  const h = await room();
+  const instance = h.rooms.get(h.data.id);
+  for (let i = 0; i < 4; i++) instance.sql.exec('INSERT INTO files(id, name, size) VALUES (?, ?, ?)', String(i), 'existing.bin', 25 * 1024 * 1024);
+  assert.equal((await h.call(`files/${crypto.randomUUID()}`, {method: 'PUT', body: 'a', headers: {'Content-Length': '1', 'X-File-Name': 'a'}})).status, 413);
+  assert.equal(instance.sql.exec('SELECT * FROM files').toArray().length, 4);
+});
+test('truncated or oversized body removes all partial chunks', async () => {
+  const h = await room();
+  for (const declared of [300001, 299999]) {
+    const response = await h.call(`files/${crypto.randomUUID()}`, {method: 'PUT', body: new Uint8Array(300000), headers: {'Content-Length': String(declared), 'X-File-Name': 'a'}});
+    assert.equal(response.status, 502);
+    assert.equal(h.rooms.get(h.data.id).sql.exec('SELECT * FROM chunks').toArray().length, 0);
+    assert.equal(h.rooms.get(h.data.id).sql.exec('SELECT * FROM files').toArray().length, 0);
+  }
+});
+test('simultaneous uploads are rejected without another reservation', async () => {
+  const h = await room();
+  let release, started;
+  const gate = new Promise(resolve => {release = resolve;});
+  const ready = new Promise(resolve => {started = resolve;});
+  h.rooms.get(h.data.id).storeFile = async () => {started(); await gate;};
+  const options = {method: 'PUT', body: 'a', headers: {'Content-Length': '1', 'X-File-Name': 'a'}};
+  const first = h.call(`files/${crypto.randomUUID()}`, options);
+  await ready;
+  assert.equal((await h.call(`files/${crypto.randomUUID()}`, options)).status, 429);
+  release();
+  assert.equal((await first).status, 200);
+  assert.equal(h.rooms.get(h.data.id).sql.exec('SELECT * FROM files').toArray().length, 1);
 });

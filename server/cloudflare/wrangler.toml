@@ -1,6 +1,8 @@
 name = "toolbox-chat-transfer"
 main = "src/worker.js"
 compatibility_date = "2026-10-24"
+# Deploy on Workers Free. No R2 subscription or other paid service is required.
+workers_dev = true
 
 [[durable_objects.bindings]]
 name = "ROOMS"
@@ -9,7 +11,3 @@ class_name = "TransferRoom"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["TransferRoom"]
-
-[[r2_buckets]]
-binding = "FILES"
-bucket_name = "toolbox-chat-files"

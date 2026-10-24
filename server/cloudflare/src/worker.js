@@ -1,4 +1,6 @@
 const MAX_FILE = 25 * 1024 * 1024;
+const MAX_ROOM_BYTES = 100 * 1024 * 1024;
+const CHUNK_BYTES = 256 * 1024;
 const TTL = 24 * 60 * 60 * 1000;
 const json = (data, status = 200) => Response.json(data, {status, headers: {"Cache-Control": "no-store"}});
 const fail = (message, status = 400) => json({error: message}, status);
@@ -50,11 +52,40 @@ export class TransferRoom {
     this.sql.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS files (id TEXT PRIMARY KEY, name TEXT, size INTEGER, ready INTEGER DEFAULT 0)");
+    this.sql.exec("CREATE TABLE IF NOT EXISTS chunks (file TEXT, part INTEGER, bytes BLOB, PRIMARY KEY(file, part))");
+    this.uploading = false;
   }
   meta(key) {return this.sql.exec("SELECT value FROM meta WHERE key = ?", key).toArray()[0]?.value;}
   event(data) {
     this.sql.exec("INSERT INTO events(payload) VALUES (?)", JSON.stringify({...data, time: Date.now()}));
     this.sql.exec("DELETE FROM events WHERE id <= (SELECT MAX(id) - 500 FROM events)");
+  }
+  async storeFile(id, request, size) {
+    const reader = request.body?.getReader();
+    if (!reader) throw new Error("empty body");
+    let received = 0, used = 0, part = 0;
+    const buffer = new Uint8Array(CHUNK_BYTES);
+    const flush = () => {
+      if (!this.meta("id") || Date.now() >= Number(this.meta("expires"))) throw new Error("expired room");
+      this.sql.exec("INSERT INTO chunks(file, part, bytes) VALUES (?, ?, ?)", id, part++, buffer.slice(0, used));
+      used = 0;
+    };
+    try {
+      while (true) {
+        const {value, done} = await reader.read();
+        if (done) break;
+        received += value.byteLength;
+        if (received > size) throw new Error("file too large");
+        for (let offset = 0; offset < value.byteLength;) {
+          const length = Math.min(CHUNK_BYTES - used, value.byteLength - offset);
+          buffer.set(value.subarray(offset, offset + length), used);
+          used += length; offset += length;
+          if (used === CHUNK_BYTES) flush();
+        }
+      }
+      if (received !== size) throw new Error("incomplete file");
+      if (used) flush();
+    } finally {await reader.cancel();}
   }
   async fetch(request) {
     try {
@@ -85,7 +116,6 @@ export class TransferRoom {
       }
       if (action === "files") {
         const id = url.pathname.split("/")[4];
-        const key = `${this.meta("id")}/${id}`;
         if (request.method === "PUT") {
           const size = Number(request.headers.get("Content-Length"));
           let name;
@@ -94,40 +124,47 @@ export class TransferRoom {
           if (!Number.isSafeInteger(size) || size <= 0 || size > MAX_FILE) return fail("파일은 1바이트~25 MiB까지 전송할 수 있습니다.", 413);
           if (this.sql.exec("SELECT COUNT(*) AS n FROM files").toArray()[0].n >= 100) return fail("방의 파일 한도(100개)에 도달했습니다.", 429);
           if (this.sql.exec("SELECT id FROM files WHERE id = ?", id).toArray().length) return fail("중복 파일입니다.", 409);
+          if (this.uploading) return fail("다른 파일을 업로드 중입니다. 잠시 후 다시 시도하세요.", 429);
+          const stored = this.sql.exec("SELECT COALESCE(SUM(size), 0) AS bytes FROM files").toArray()[0].bytes;
+          if (stored + size > MAX_ROOM_BYTES) return fail("방의 파일 저장 한도(100 MiB)에 도달했습니다. 새 방을 만드세요.", 413);
           this.sql.exec("INSERT INTO files(id, name, size) VALUES (?, ?, ?)", id, name, size);
+          this.uploading = true;
           try {
-            await this.env.FILES.put(key, request.body, {httpMetadata: {contentType: "application/octet-stream"}});
-            // The expiration alarm may have run while an upload was in flight.
+            await this.storeFile(id, request, size);
             if (!this.meta("id") || Date.now() >= Number(this.meta("expires"))) {
-              await this.env.FILES.delete(key); return fail("방이 만료되었습니다.", 410);
+              throw new Error("expired room");
             }
             this.sql.exec("UPDATE files SET ready = 1 WHERE id = ?", id);
             this.event({type: "file", file: id, name, size});
             return json({ok: true, file: id});
           } catch {
-            await this.env.FILES.delete(key);
+            this.sql.exec("DELETE FROM chunks WHERE file = ?", id);
             this.sql.exec("DELETE FROM files WHERE id = ?", id);
             return fail("파일 저장에 실패했습니다.", 502);
-          }
+          } finally {this.uploading = false;}
         }
         if (request.method === "GET") {
           const file = this.sql.exec("SELECT * FROM files WHERE id = ? AND ready = 1", id).toArray()[0];
           if (!file) return fail("파일을 찾을 수 없습니다.", 404);
-          const object = await this.env.FILES.get(key);
-          if (!object) return fail("파일을 찾을 수 없습니다.", 404);
-          return new Response(object.body, {headers: {"Content-Type": "application/octet-stream", "Content-Length": String(object.size), "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}});
+          let part = 0, sent = 0;
+          const sql = this.sql;
+          const stream = new ReadableStream({pull(controller) {
+            if (sent === file.size) {controller.close(); return;}
+            const chunk = sql.exec("SELECT bytes FROM chunks WHERE file = ? AND part = ?", id, part++).toArray()[0];
+            if (!chunk) {controller.error(new Error("파일이 만료되었거나 손상되었습니다.")); return;}
+            const bytes = new Uint8Array(chunk.bytes);
+            sent += bytes.byteLength;
+            controller.enqueue(bytes);
+          }});
+          return new Response(stream, {headers: {"Content-Type": "application/octet-stream", "Content-Length": String(file.size), "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}});
         }
       }
       return fail("지원하지 않는 요청입니다.", 405);
     } catch {return fail("요청 내용을 확인하세요.", 400);}
   }
   async alarm() {
-    const room = this.meta("id");
-    if (room) {
-      const ids = this.sql.exec("SELECT id FROM files").toArray().map(row => `${room}/${row.id}`);
-      if (ids.length) await this.env.FILES.delete(ids);
-    }
     // Keep the schema available for in-flight requests on this same instance.
+    this.sql.exec("DELETE FROM chunks");
     this.sql.exec("DELETE FROM events");
     this.sql.exec("DELETE FROM files");
     this.sql.exec("DELETE FROM meta");

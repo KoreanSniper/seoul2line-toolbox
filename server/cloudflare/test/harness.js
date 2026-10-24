@@ -2,14 +2,9 @@ import {DatabaseSync} from 'node:sqlite';
 import worker, {TransferRoom} from '../src/worker.js';
 
 export function environment() {
-  const objects = new Map(), rooms = new Map();
+  const rooms = new Map();
   const env = {
     SERVICE_TOKEN: 'test-service-token',
-    FILES: {
-      async put(key, stream) {objects.set(key, new Uint8Array(await new Response(stream).arrayBuffer()));},
-      async get(key) {const bytes = objects.get(key); return bytes && {body: bytes, size: bytes.length};},
-      async delete(keys) {for (const key of Array.isArray(keys) ? keys : [keys]) objects.delete(key);},
-    },
     ROOMS: {
       idFromName: name => name,
       get(id) {
@@ -30,7 +25,7 @@ export function environment() {
       },
     },
   };
-  return {env, rooms, objects, fetch: request => worker.fetch(request, env)};
+  return {env, rooms, fetch: request => worker.fetch(request, env)};
 }
 
 export function request(path, options = {}) {
