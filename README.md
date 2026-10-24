@@ -93,7 +93,7 @@ powershell -ExecutionPolicy Bypass -File installer\build.ps1 -InstallDependencie
 | 도구 | 주요 기능 |
 | --- | --- |
 | 네트워크 상태 | 네트워크 정보 조회, Ping 등 진단 명령 실행, 결과 로그 복사 |
-| Same-WiFi LAN 통합 | 서버·클라이언트 연결, 텍스트·파일 송수신, 사용자 허용 시 수신 명령 실행 |
+| Cloudflare Chat Transfer | 방 코드로 채팅·파일 공유, HTTPS 연결, 전송 진행률·기록 ([서버 설정](docs/CLOUDFLARE_TRANSFER.md)) |
 
 ### 파일
 

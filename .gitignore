@@ -32,6 +32,10 @@ __pycache__/
 venv/
 .pytest_cache/
 .mypy_cache/
+node_modules/
+.wrangler/
+.dev.vars
+.dev.vars.*
 
 # Build outputs
 build/
