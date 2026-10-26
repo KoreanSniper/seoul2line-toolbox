@@ -11,7 +11,7 @@ import numpy as np
 TOOL_ICONS = {
     'home.overview': 'grid', 'home.system_monitor': 'monitor',
     'gaming.launchers': 'play', 'gaming.music': 'music', 'gaming.workspace_presets': 'briefcase',
-    'gaming.aim_trainer': 'crosshair',
+    'gaming.aim_trainer': 'crosshair', 'gaming.soundboard': 'music',
     'developer.minecraft_commands': 'cube', 'developer.code_editor': 'code',
     'developer.git': 'git', 'developer.terminal': 'terminal',
     'developer.utilities': 'convert', 'developer.scratchpad': 'notebook',

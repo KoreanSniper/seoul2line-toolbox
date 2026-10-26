@@ -29,6 +29,7 @@ try {
         '--name', 'seoul2line Toolbox', '--icon', 'app/assets/toolbox.ico', '--add-data', 'app/assets;app/assets',
         '--add-data', 'installer/install_update.ps1;updater',
         '--add-data', 'app/games/starsystem/renderer/shaders;app/games/starsystem/renderer/shaders', '--collect-submodules', 'app',
+        '--collect-all', 'soundcard', '--collect-all', '_soundfile_data',
         '--hidden-import', 'uuid', '--hidden-import', 'keyword', 'main.py')
     if (-not (Test-Path -LiteralPath 'dist/seoul2line Toolbox/seoul2line Toolbox.exe')) { throw 'PyInstaller output missing.' }
     foreach ($pluginName in @('developer_tools', 'automation_tools', 'example_plugin')) {
