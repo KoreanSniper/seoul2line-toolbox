@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 import json
 import re
-import shutil
 import sqlite3
 import uuid
 
@@ -81,7 +80,7 @@ class SoundboardStore:
         except (OSError, ValueError, sqlite3.Error):
             pass  # Never turn a successful DB transaction into a failed registration.
 
-    def register_file(self, identity, source, validate):
+    def register_file(self, identity, source, validate, cancel=None):
         source = Path(source)
         suffix = source.suffix.lower()
         if suffix not in {".mp3", ".wav", ".ogg"}:
@@ -90,11 +89,20 @@ class SoundboardStore:
         target = self.folder / (name + suffix)
         temporary = self.folder / (name + ".tmp")
         relative = target.relative_to(self.root).as_posix()
+        def check_cancel():
+            if cancel is not None and cancel.is_set():
+                raise ValueError("오디오 등록을 취소했습니다.")
         try:
-            shutil.copyfile(source, temporary)
+            check_cancel()
+            with source.open("rb") as original, temporary.open("xb") as copied:
+                while chunk := original.read(1024 * 1024):
+                    check_cancel()
+                    copied.write(chunk)
             validate(temporary)
+            check_cancel()
             temporary.replace(target)
             with self.connect() as db:
+                check_cancel()
                 row = db.execute("SELECT path FROM sounds WHERE id=?", (identity,)).fetchone()
                 if row is None:
                     raise ValueError("삭제된 사운드입니다.")

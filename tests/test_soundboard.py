@@ -1,12 +1,14 @@
 import gc
 from pathlib import Path
 import sqlite3
+import sys
 import tempfile
 import threading
 import time
 import tkinter as tk
 from types import SimpleNamespace
 import unittest
+import wave
 from unittest.mock import patch
 
 from app.palette import ThemeMode
@@ -37,7 +39,7 @@ class FakeDriver:
     def devices(self):
         return [{"id": "physical", "name": "스피커", "channels": 2}, {"id": "virtual", "name": "가상 장치", "channels": 1}]
 
-    def validate(self, path):
+    def validate(self, path, cancel=None):
         if Path(path).read_bytes() == b"bad":
             raise ValueError("손상된 오디오")
 
@@ -126,7 +128,7 @@ class StoreTests(unittest.TestCase):
         self.assertFalse(list(self.store.folder.glob("*.wav")))
 
     def test_copy_failure_leaves_no_registration(self):
-        with patch("app.services.soundboard_store.shutil.copyfile", side_effect=OSError("copy failed")):
+        with patch("pathlib.Path.open", side_effect=OSError("copy failed")):
             with self.assertRaises(OSError):
                 self.store.register_file(self.identity, self.source, self.driver.validate)
         self.assertEqual(self.store.items()[0]["path"], "")
@@ -160,6 +162,35 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.reorder([self.identity, self.identity])
         self.assertEqual(len(self.store.items()), 1)
+
+    def test_registration_cancelled_during_validation_keeps_old_file(self):
+        old = self.store.register_file(self.identity, self.source, self.driver.validate)
+        cancelled = threading.Event()
+        def validate(path):
+            cancelled.set()
+        with self.assertRaisesRegex(ValueError, "취소"):
+            self.store.register_file(self.identity, self.source, validate, cancelled)
+        self.assertEqual(self.store.items()[0]["path"], old)
+        self.assertEqual(len(list(self.store.folder.glob("*.wav"))), 1)
+
+    def test_cleanup_never_deletes_non_owned_filename(self):
+        path = self.store.folder / "user-song.wav"
+        path.write_bytes(b"user")
+        with self.store.connect() as db:
+            db.execute("UPDATE sounds SET path=? WHERE id=?", (path.relative_to(self.store.root).as_posix(), self.identity))
+        self.store.delete(self.identity)
+        self.assertEqual(path.read_bytes(), b"user")
+
+    def test_real_decoder_validates_temporary_copy_and_survives_original_removal(self):
+        with wave.open(str(self.source), "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(22050)
+            audio.writeframes(b"\0\0" * 2205)
+        driver = AudioDriver()
+        relative = self.store.register_file(self.identity, self.source, driver.validate)
+        self.source.unlink()
+        driver.validate(self.store.resolve(relative))
 
 
 class AudioTests(unittest.TestCase):
@@ -208,6 +239,34 @@ class AudioTests(unittest.TestCase):
         self.driver.finish.set()
         wait_for(lambda: self.audio.current is None)
         self.assertEqual(len(self.driver.stopped), 2)
+
+    def test_all_endpoints_fail_no_default_fallback(self):
+        self.audio.toggle("a", "a.wav", [dict(OUTPUTS[0], id="missing")])
+        wait_for(lambda: self.audio.current is None)
+        self.assertFalse(self.driver.started)
+        errors = []
+        while not self.audio.events.empty():
+            event = self.audio.events.get_nowait()
+            if event[1] == "error":
+                errors.append(event)
+        self.assertEqual(len(errors), 1)
+
+    def test_real_decoder_missing_and_corrupt_playback_are_contained(self):
+        self.audio.close()
+        self.audio.worker.join(2)
+        self.audio = SoundboardAudio(AudioDriver())
+        speaker = SimpleNamespace(id="physical", channels=2)
+        with tempfile.TemporaryDirectory() as folder:
+            corrupt = Path(folder) / "corrupt.wav"
+            corrupt.write_bytes(b"corrupt")
+            with patch.dict(sys.modules, {"soundcard": SimpleNamespace(all_speakers=lambda: [speaker])}):
+                for path in (Path(folder) / "missing.wav", corrupt):
+                    self.audio.toggle(str(path), path, [OUTPUTS[0]])
+                    wait_for(lambda: self.audio.current is None)
+                    events = []
+                    while not self.audio.events.empty():
+                        events.append(self.audio.events.get_nowait())
+                    self.assertTrue(any(e[1] == "error" for e in events))
 
 
 class UITests(unittest.TestCase):
@@ -305,6 +364,96 @@ class UITests(unittest.TestCase):
             self.root.update()
             tool.destroy()
             tool.audio.worker.join(2)
+
+    def test_normal_mode_device_volume_highlight_eof_and_edit_stops(self):
+        source = Path(self.temp.name) / "source.wav"
+        source.write_bytes(b"valid")
+        identity = self.store.add()
+        self.store.register_file(identity, source, self.driver.validate)
+        self.tool.outputs = [dict(o) for o in OUTPUTS]
+        self.tool.audio.volumes(100, self.tool.outputs)
+        self.tool.reload()
+        self.tool.click(identity)
+        self.pump()
+        self.assertTrue(self.tool.buttons[identity].active)
+        self.tool.device_scales[0].set(23)
+        self.pump()
+        self.assertFalse(self.tool.editing)
+        self.assertIn(("physical", .23), self.driver.samples)
+        self.assertEqual(self.store.settings()[1][0]["volume"], 23)
+        self.driver.finish.set()
+        self.pump()
+        self.assertFalse(self.tool.buttons[identity].active)
+        self.driver.finish.clear()
+        self.tool.click(identity)
+        self.pump()
+        self.tool.toggle_edit()
+        self.pump()
+        self.assertIsNone(self.tool.audio.current)
+        self.assertFalse(any(self.driver.active.values()))
+
+    def test_missing_or_corrupt_file_error_does_not_break_ui(self):
+        actual = AudioDriver()
+        source = Path(self.temp.name) / "corrupt.wav"
+        source.write_bytes(b"corrupt")
+        with self.assertRaises(Exception):
+            actual.validate(source)
+        with self.assertRaises(Exception):
+            actual.validate(source.with_name("missing.wav"))
+        identity = self.store.add()
+        self.tool.reload()
+        self.tool.click(identity)
+        self.assertIsNone(self.tool.audio.current)
+        self.tool.toggle_edit()
+        self.assertTrue(self.tool.editing)
+
+    def test_renamed_same_name_distinct_ids_and_missing_device_preserved(self):
+        self.tool.outputs = [dict(o) for o in OUTPUTS]
+        self.tool.devices = [dict(d, name="동일 이름") for d in self.driver.devices()]
+        self.tool.update_selectors()
+        self.tool.sync_state()
+        self.assertIn("동일 이름", self.tool.output_summary.cget("text"))
+        self.assertNotEqual(self.tool.selectors[0].get(), self.tool.selectors[1].get())
+        self.tool.devices = self.tool.devices[:1]
+        self.tool.update_selectors()
+        self.assertEqual(self.tool.outputs[1]["id"], "virtual")
+        self.assertIn("연결 끊김", self.tool.selectors[1].get())
+
+    def test_close_during_registration_cancels_and_cleans_new_copy(self):
+        entered, release = threading.Event(), threading.Event()
+        def validating(path, cancel=None):
+            entered.set()
+            release.wait(2)
+            if cancel and cancel.is_set():
+                raise ValueError("취소")
+        self.driver.validate = validating
+        source = Path(self.temp.name) / "source.wav"
+        source.write_bytes(b"valid")
+        self.tool.toggle_edit()
+        self.tool.add()
+        identity = self.tool.items[0]["id"]
+        with patch("app.tools.gaming_soundboard.filedialog.askopenfilename", return_value=str(source)):
+            self.tool.click(identity)
+        self.assertTrue(entered.wait(1))
+        self.tool.destroy()
+        release.set()
+        self.tool.executor.shutdown(wait=True)
+        self.assertEqual(self.store.items()[0]["path"], "")
+        self.assertFalse(list(self.store.folder.glob("*.wav")))
+        self.assertFalse(list(self.store.folder.glob("*.tmp")))
+
+    def test_async_file_selection_registers_copied_file(self):
+        source = Path(self.temp.name) / "source.wav"
+        source.write_bytes(b"valid")
+        self.tool.toggle_edit()
+        self.tool.add()
+        identity = self.tool.items[0]["id"]
+        with patch("app.tools.gaming_soundboard.filedialog.askopenfilename", return_value=str(source)):
+            self.tool.click(identity)
+        self.pump(.3)
+        self.assertFalse(self.tool.busy)
+        source.unlink()
+        self.assertTrue(self.store.resolve(self.store.items()[0]["path"]).exists())
 
 
 if __name__ == "__main__":

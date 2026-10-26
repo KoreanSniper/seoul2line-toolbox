@@ -15,6 +15,7 @@ def run(report_path: str) -> int:
         from app.tools.system_monitor import SystemMonitor
         from app.games.trsim.view import RailPanic
         from app.games.aim_trainer.view import AimTrainer
+        from app.tools.gaming_soundboard import SoundboardTool
         app = Seoul2LineToolbox()
         app.withdraw()
         app.updater.close()
@@ -51,6 +52,19 @@ def run(report_path: str) -> int:
         app.show_section('설정')
         app.update_idletasks()
         assert not aim_view.winfo_exists() and aim_view.raw is None and aim_view.job is None
+        soundboard = next(tool for tool in app.registry.tools_for('게임') if tool.id == 'gaming.soundboard')
+        app.show_tool(soundboard)
+        app.update_idletasks()
+        soundboard_view = next(widget for widget in descendants(app.workspace) if isinstance(widget, SoundboardTool))
+        assert soundboard_view.store is not None and not soundboard_view.editing
+        import soundfile
+        assert {'MP3', 'WAV', 'OGG'} <= set(soundfile.available_formats())
+        import soundcard
+        if getattr(sys, 'frozen', False):
+            assert (Path(soundcard.__file__).parent / 'mediafoundation.py.h').is_file()
+        app.show_section('설정')
+        app.update_idletasks()
+        assert not soundboard_view.winfo_exists() and soundboard_view.audio.closed
         tools = [tool.id for section in app.registry.sections() for tool in app.registry.tools_for(section)]
         assert "minigame.micro_warfare" in tools and "minigame.orbit_lab" in tools
         assert not [plugin.error for plugin in app.plugin_manager.plugins if plugin.error]
@@ -62,7 +76,7 @@ def run(report_path: str) -> int:
                 'automation.editor', 'automation.history', 'automation.manager'}
             assert all(tool.plugin_id == 'automation_tools' for tool in automation_tools)
         report.update(ok=True, version=VERSION, tool_count=len(tools), data_directory=str(APP_DIR),
-                      plugins=[plugin.id for plugin in app.plugin_manager.plugins], checked_tools=["settings.preferences", "home.system_monitor", "minigame.trsim", "gaming.aim_trainer"])
+                      plugins=[plugin.id for plugin in app.plugin_manager.plugins], checked_tools=["settings.preferences", "home.system_monitor", "minigame.trsim", "gaming.aim_trainer", "gaming.soundboard"])
     except Exception:
         report["error"] = traceback.format_exc()
     finally:

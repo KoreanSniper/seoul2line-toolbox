@@ -1,5 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 import queue
+import threading
 import tkinter as tk
 from tkinter import filedialog, ttk
 
@@ -17,6 +19,7 @@ class SoundboardTool(tk.Frame):
         self.audio = audio or SoundboardAudio()
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="soundboard-files")
         self.results = queue.Queue()
+        self.files_cancel = threading.Event()
         self.editing = False
         self.closed = False
         self.busy = False
@@ -166,7 +169,8 @@ class SoundboardTool(tk.Frame):
     def sync_state(self):
         for identity, button in self.buttons.items():
             button.set_active(identity == self.audio.current and not self.editing)
-        names = [f"{o['name']} ({o['volume']:g}%)" for o in self.outputs]
+        current_names = {d["id"]: d["name"] for d in self.devices}
+        names = [f"{current_names.get(o['id'], o['name'])} ({o['volume']:g}%)" for o in self.outputs]
         self.output_summary.configure(text="출력: " + (" · ".join(names) or "개인설정에서 장치를 선택하세요"), wraplength=max(180, self.winfo_width()-40))
 
     def action(self, command):
@@ -253,7 +257,8 @@ class SoundboardTool(tk.Frame):
             if source:
                 self.busy = True
                 self.status.set("파일 복사 및 오디오 검증 중…")
-                self.submit("registered", lambda: self.store.register_file(identity, source, self.audio.driver.validate))
+                validate = partial(self.audio.driver.validate, cancel=self.files_cancel)
+                self.submit("registered", partial(self.store.register_file, identity, source, validate, self.files_cancel))
             return
         try:
             if not item["path"]:
@@ -272,11 +277,12 @@ class SoundboardTool(tk.Frame):
         self.sync_state()
 
     def submit(self, kind, command):
+        results = self.results
         def run():
             try:
-                self.results.put((kind, command(), None))
+                results.put((kind, command(), None))
             except Exception as exc:
-                self.results.put((kind, None, str(exc)))
+                results.put((kind, None, str(exc)))
         self.executor.submit(run)
 
     def refresh_devices(self):
@@ -363,6 +369,7 @@ class SoundboardTool(tk.Frame):
         if self.closed:
             return
         self.closed = True
+        self.files_cancel.set()
         self.save_titles()
         self.audio.close()
         self.executor.shutdown(wait=False, cancel_futures=True)

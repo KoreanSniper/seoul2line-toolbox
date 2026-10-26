@@ -29,14 +29,15 @@ class AudioDriver:
         with audio_thread():
             return [{"id": str(s.id), "name": s.name, "channels": s.channels} for s in sc.all_speakers()]
 
-    def validate(self, path):
+    def validate(self, path, cancel=None):
         import soundfile as sf
         with sf.SoundFile(str(path)) as sound:
             if sound.frames <= 0 or sound.samplerate <= 0:
                 raise ValueError("비어 있는 오디오 파일입니다.")
             # Decode the entire copied file, in bounded memory, before committing.
             while len(sound.read(65536, dtype="float32", always_2d=True)):
-                pass
+                if cancel is not None and cancel.is_set():
+                    raise ValueError("오디오 등록을 취소했습니다.")
 
     def play(self, path, output, ready, start, cancel, gain):
         import soundcard as sc
