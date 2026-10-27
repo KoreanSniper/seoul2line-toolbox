@@ -1,6 +1,7 @@
 import gc
 from pathlib import Path
 import tempfile
+import threading
 import time
 import tkinter as tk
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ import wave
 
 from app.palette import ThemeMode
 from app.services.tts import WindowsTTS
+from app.services.soundboard_store import SoundboardStore
 from app.tools.file_tts import TTSTool, register
 from app.tool_registry import ToolRegistry
 
@@ -21,6 +23,76 @@ def write_wave(path):
 
 
 class TTSTests(unittest.TestCase):
+    def test_one_time_output_cleanup_success_failure_and_cancel(self):
+        output = {"id": "cable-id", "name": "CABLE Input", "channels": 2}
+        for outcome in ("success", "failure", "cancel"):
+            with self.subTest(outcome=outcome):
+                engine = WindowsTTS()
+                paths = []
+                def generate(payload):
+                    paths.append(Path(payload["path"]).parent)
+                    write_wave(payload["path"])
+                    if outcome == "cancel":
+                        engine.close()
+                def play(path, device, ready, start, cancel, gain):
+                    self.assertTrue(Path(path).is_file())
+                    self.assertEqual(device["id"], "cable-id")
+                    self.assertTrue(start.is_set())
+                    self.assertEqual(gain("cable-id"), 1)
+                    if outcome == "failure":
+                        raise OSError("장치 연결 해제")
+                with patch.object(engine, "_run", side_effect=generate), patch("app.services.soundboard_audio.AudioDriver.play", side_effect=play) as playing:
+                    if outcome == "success":
+                        self.assertEqual(engine.play_once("안내", output, volume=25), "CABLE Input")
+                    else:
+                        with self.assertRaises((OSError, RuntimeError)):
+                            engine.play_once("안내", output)
+                    self.assertEqual(playing.call_count, 0 if outcome == "cancel" else 1)
+                self.assertTrue(paths)
+                self.assertTrue(all(not path.exists() for path in paths))
+
+    def test_one_time_close_during_play_releases_file(self):
+        engine = WindowsTTS()
+        entered = threading.Event()
+        paths, errors = [], []
+        def play(path, output, ready, start, cancel, gain):
+            paths.append(Path(path))
+            entered.set()
+            if not cancel.wait(3):
+                raise AssertionError("종료 취소가 전달되지 않음")
+        def run():
+            try:
+                engine.play_once("종료", {"id": "cable", "name": "케이블"})
+            except Exception as exc:
+                errors.append(exc)
+        with patch.object(engine, "_run", side_effect=lambda p: write_wave(p["path"])), patch("app.services.soundboard_audio.AudioDriver.play", side_effect=play):
+            worker = threading.Thread(target=run)
+            worker.start()
+            try:
+                self.assertTrue(entered.wait(3))
+                self.assertTrue(paths[0].exists())
+            finally:
+                engine.close()
+                worker.join(3)
+            self.assertFalse(worker.is_alive())
+        self.assertFalse(errors)
+        self.assertFalse(paths[0].parent.exists())
+
+    def test_soundboard_registration_and_failed_copy_rollback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SoundboardStore(directory)
+            engine = WindowsTTS()
+            with patch("app.services.soundboard_store.SoundboardStore", return_value=store), patch.object(engine, "_run", side_effect=lambda p: write_wave(p["path"])):
+                engine.add_to_soundboard("테스트", "제목")
+                item = store.items()[0]
+                self.assertEqual(item["title"], "제목")
+                self.assertTrue(store.resolve(item["path"]).exists())
+                with patch.object(store, "register_file", side_effect=OSError("디스크 오류")):
+                    with self.assertRaises(OSError):
+                        engine.add_to_soundboard("실패", "실패 항목")
+                self.assertEqual(store.items(), [item])
+                self.assertEqual(len(list(store.folder.glob("*.wav"))), 1)
+
     def test_validation_and_failed_generation_preserve_target(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "한글.wav"
@@ -70,8 +142,104 @@ class FakeEngine:
     def close(self):
         self.closed = True
 
+    def play_once(self, *args):
+        self.calls.append(("played", args))
+        return args[1]["name"]
+
+    def add_to_soundboard(self, *args):
+        self.calls.append(("added", args))
+        return args[1]
+
 
 class TTSUITests(unittest.TestCase):
+    def setUp(self):
+        self.devices = [{"id": "cable", "name": "케이블", "channels": 2}]
+        self.device_patch = patch("app.tools.file_tts.AudioDriver.devices", side_effect=lambda: list(self.devices))
+        self.device_patch.start()
+        self.addCleanup(self.device_patch.stop)
+
+    def test_close_during_soundboard_registration_cleans_pending_item(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SoundboardStore(directory)
+            engine = WindowsTTS()
+            entered = threading.Event()
+            def validate(path, cancel=None):
+                entered.set()
+                if not cancel.wait(3):
+                    raise AssertionError("창 종료 시 등록 취소가 전달되지 않음")
+            root = tk.Tk()
+            tool = None
+            try:
+                with patch.object(engine, "voices", return_value=[{"name": "한국어", "culture": "ko-KR"}]), patch.object(engine, "_run", side_effect=lambda p: write_wave(p["path"])), patch("app.services.soundboard_store.SoundboardStore", return_value=store), patch("app.services.soundboard_audio.AudioDriver.validate", side_effect=validate):
+                    tool = TTSTool(root, SimpleNamespace(dark_mode=ThemeMode("dark")), engine)
+                    tool.pack()
+                    deadline = time.monotonic() + 3
+                    while tool.busy and time.monotonic() < deadline:
+                        root.update()
+                        time.sleep(.005)
+                    self.assertFalse(tool.busy)
+                    tool.text.insert("1.0", "등록 중 종료")
+                    tool.generate(True)
+                    self.assertTrue(entered.wait(3))
+                    tool.destroy()
+                    tool.executor.shutdown(wait=True)
+                    self.assertFalse(store.items())
+                    self.assertFalse(list(store.folder.glob("*.wav")))
+                    self.assertFalse(list(store.folder.glob("*.tmp")))
+            finally:
+                if tool:
+                    tool.destroy()
+                    tool.executor.shutdown(wait=True)
+                root.destroy()
+                del tool
+                gc.collect()
+
+    def test_one_time_selection_refresh_dispatch_and_direct_registration(self):
+        root = tk.Tk()
+        engine = FakeEngine()
+        tool = TTSTool(root, SimpleNamespace(dark_mode=ThemeMode("dark")), engine)
+        tool.pack(fill="both", expand=True)
+        def until(predicate):
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                root.update()
+                if predicate():
+                    return
+                time.sleep(.005)
+            self.fail("TTS 화면 작업 시간 초과")
+        try:
+            until(lambda: not tool.busy and not tool.discovering)
+            tool.text.insert("1.0", "한글 첫 줄\n두 번째 줄")
+            tool.generate(play_once=True)
+            self.assertIn("장치", tool.status.get())
+            self.assertFalse(engine.calls)
+            tool.output_device.current(0)
+            tool.refresh_devices()
+            until(lambda: not tool.discovering)
+            self.assertEqual(tool.output_device.current(), 0)
+            tool.rate.set(2)
+            tool.volume.set(30)
+            with patch("app.tools.file_tts.filedialog.asksaveasfilename", side_effect=AssertionError("일회용 출력에 저장 창이 열림")):
+                tool.generate(play_once=True)
+                until(lambda: not tool.busy)
+            self.assertEqual(engine.calls[-1], ("played", ("한글 첫 줄\n두 번째 줄", self.devices[0], "한국어", 2, 30)))
+            self.assertIn("폐기 완료", tool.status.get())
+            tool.generate(True)
+            until(lambda: not tool.busy)
+            self.assertEqual(engine.calls[-1][0], "added")
+            self.assertEqual(engine.calls[-1][1][1], "한글 첫 줄")
+            self.devices = [{"id": "other", "name": "동일 이름", "channels": 2}]
+            tool.refresh_devices()
+            until(lambda: not tool.discovering)
+            self.assertEqual(tool.output_device.current(), -1)
+            self.assertIn("다시 선택", tool.status.get())
+        finally:
+            tool.destroy()
+            tool.executor.shutdown(wait=True)
+            root.destroy()
+            del tool
+            gc.collect()
+
     def test_registration_three_themes_save_and_destroy(self):
         registry = ToolRegistry()
         register(registry)

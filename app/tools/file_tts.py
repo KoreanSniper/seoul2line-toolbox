@@ -22,6 +22,7 @@ class TTSTool(tk.Frame):
         self.voices = []
         self.devices = []
         self.discovering = False
+        self.timer = None
         self.status = tk.StringVar(value="설치된 음성을 확인하는 중…")
         self.rate = tk.IntVar(value=0)
         self.volume = tk.IntVar(value=100)
@@ -50,7 +51,9 @@ class TTSTool(tk.Frame):
         output_row.columnconfigure(0, weight=1)
         self.output_device = ttk.Combobox(output_row, state="disabled", width=20)
         self.output_device.grid(row=0, column=0, sticky="ew")
-        RoundedButton(output_row, "새로고침", self.refresh_devices, colors, compact=True, width=90).grid(row=0, column=1, padx=(8, 0))
+        refresh_button = RoundedButton(output_row, "새로고침", self.refresh_devices, colors, compact=True)
+        refresh_button.configure(width=90)
+        refresh_button.grid(row=0, column=1, padx=(8, 0))
         actions = tk.Frame(controls, bg=colors["panel"])
         actions.grid(row=5, column=0, columnspan=2, sticky="e")
         self.generate_button = RoundedButton(actions, "WAV 저장", self.generate, colors, compact=True)
@@ -160,7 +163,9 @@ class TTSTool(tk.Frame):
         self.closed = True
         self.engine.close()
         self.executor.shutdown(wait=False, cancel_futures=True)
-        self.after_cancel(self.timer)
+        if self.timer is not None:
+            self.after_cancel(self.timer)
+            self.timer = None
         super().destroy()
         self.status = self.rate = self.volume = self.title = None
 
