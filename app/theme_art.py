@@ -23,6 +23,7 @@ TOOL_ICONS = {
     'minigame.hub': 'game', 'minigame.starsystem_gpu': 'orbit', 'minigame.trsim': 'train',
     'minigame.factory': 'factory', 'minigame.korean_stocks': 'stocks',
     'minigame.micro_warfare': 'tank', 'minigame.orbit_lab': 'rocket',
+    'minigame.sandbox': 'cube',
     'settings.preferences': 'palette', 'settings.paths': 'path', 'settings.hotkeys': 'keyboard',
     'settings.plugins': 'puzzle', 'settings.updates': 'download', 'example_plugin.demo': 'puzzle',
 }

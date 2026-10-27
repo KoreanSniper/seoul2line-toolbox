@@ -16,6 +16,7 @@ def run(report_path: str) -> int:
         from app.games.trsim.view import RailPanic
         from app.games.aim_trainer.view import AimTrainer
         from app.tools.gaming_soundboard import SoundboardTool
+        from app.games.sandbox.view import SandboxView
         app = Seoul2LineToolbox()
         app.withdraw()
         app.updater.close()
@@ -65,6 +66,14 @@ def run(report_path: str) -> int:
         app.show_section('설정')
         app.update_idletasks()
         assert not soundboard_view.winfo_exists() and soundboard_view.audio.closed
+        sandbox = next(tool for tool in app.registry.tools_for('미니게임') if tool.id == 'minigame.sandbox')
+        app.show_tool(sandbox)
+        app.update_idletasks()
+        sandbox_view = next(widget for widget in descendants(app.workspace) if isinstance(widget, SandboxView))
+        assert sandbox_view.tick_id is not None and 'sand' in sandbox_view.world.cells
+        app.show_section('설정')
+        app.update_idletasks()
+        assert not sandbox_view.winfo_exists() and sandbox_view.tick_id is None
         tools = [tool.id for section in app.registry.sections() for tool in app.registry.tools_for(section)]
         assert "minigame.micro_warfare" in tools and "minigame.orbit_lab" in tools
         assert not [plugin.error for plugin in app.plugin_manager.plugins if plugin.error]
@@ -76,7 +85,7 @@ def run(report_path: str) -> int:
                 'automation.editor', 'automation.history', 'automation.manager'}
             assert all(tool.plugin_id == 'automation_tools' for tool in automation_tools)
         report.update(ok=True, version=VERSION, tool_count=len(tools), data_directory=str(APP_DIR),
-                      plugins=[plugin.id for plugin in app.plugin_manager.plugins], checked_tools=["settings.preferences", "home.system_monitor", "minigame.trsim", "gaming.aim_trainer", "gaming.soundboard"])
+                      plugins=[plugin.id for plugin in app.plugin_manager.plugins], checked_tools=["settings.preferences", "home.system_monitor", "minigame.trsim", "gaming.aim_trainer", "gaming.soundboard", "minigame.sandbox"])
     except Exception:
         report["error"] = traceback.format_exc()
     finally:
