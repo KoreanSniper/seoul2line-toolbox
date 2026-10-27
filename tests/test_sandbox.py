@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from app.games.sandbox.model import MATERIALS, Sandbox
 
@@ -189,6 +190,66 @@ class SandboxTests(unittest.TestCase):
         self.assertEqual(len(w.cells), 480)
         self.assertTrue(set(w.cells) <= set(MATERIALS))
         self.assertTrue(all(-273 <= t <= 2000 for t in w.heat))
+
+    def test_integer_temperatures_load_and_oversized_or_broken_files_fail(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "scene.json"
+            self.world.put(10, 10, "metal")
+            self.world.save(path)
+            data = json.loads(path.read_text())
+            data["heat"] = [20] * 480
+            path.write_text(json.dumps(data))
+            loaded = Sandbox.load(path)
+            loaded.step()
+            self.assertEqual(loaded.cells.count("metal"), 1)
+            for invalid in ("{", "null", "[]", '{"version": true}', " " * 5_000_001):
+                path.write_text(invalid)
+                with self.assertRaises(ValueError):
+                    Sandbox.load(path)
+
+    def test_plant_growth_consumes_water_and_fire_smoke_expire(self):
+        w = self.world
+        w.put(10, 10, "plant")
+        w.put(11, 10, "water")
+        with patch.object(w.rng, "random", return_value=0):
+            w.step()
+        self.assertEqual(w.cells.count("plant"), 2)
+        self.assertEqual(w.cells.count("water"), 0)
+        w.clear()
+        w.put(0, 0, "fire")
+        w.life[0] = 1
+        w.step()
+        self.assertEqual(w.cells[0], "smoke")
+        w.life[0] = 1
+        w.step()
+        self.assertEqual(w.cells[0], "empty")
+
+    def test_closed_saltwater_keeps_salt_until_space_available(self):
+        w = self.world
+        i = 10 * 24 + 10
+        w.put(10, 10, "saltwater")
+        for y in range(9, 12):
+            for x in range(9, 12):
+                if (x, y) != (10, 10):
+                    w.put(x, y, "glass")
+                    w.heat[y * 24 + x] = 150
+        w.heat[i] = 150
+        w.step()
+        self.assertEqual(w.cells[i], "saltwater")
+        w.put(10, 9, "empty")
+        w.step()
+        self.assertEqual(w.cells.count("steam"), 1)
+        self.assertEqual(w.cells.count("salt"), 1)
+
+    def test_separated_wires_do_not_jump_and_metal_count_is_preserved(self):
+        w = self.world
+        for x in (0, 1, 2, 4, 5, 6):
+            w.put(x, 0, "metal")
+        w.put(0, 0, "spark")
+        for _ in range(30):
+            w.step()
+            self.assertEqual(w.cells[4:7], ["metal"] * 3)
+            self.assertEqual(w.cells.count("metal") + w.cells.count("spark"), 6)
 
 
 if __name__ == "__main__":

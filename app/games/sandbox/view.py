@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 import tkinter as tk
 import time
 
@@ -53,6 +52,7 @@ class SandboxView(tk.Frame):
         sidebar = tk.Frame(body, bg=c["panel_soft"], width=156)
         sidebar.pack(side="left", fill="y", padx=(0, 8))
         side_canvas = tk.Canvas(sidebar, width=145, bg=c["panel_soft"], highlightthickness=0)
+        self.side_canvas = side_canvas
         scroll = styled_scrollbar(sidebar, "vertical", side_canvas.yview, c)
         scroll.pack(side="right", fill="y")
         side_canvas.pack(side="left", fill="both", expand=True)
@@ -81,6 +81,10 @@ class SandboxView(tk.Frame):
                                activeforeground=c["text"], command=lambda key=key: self.select(key))
             button.pack(side="left", fill="x", expand=True)
             self.buttons[key] = button
+            button.bind("<Up>", lambda _, key=key: self.cycle_material(key, -1))
+            button.bind("<Down>", lambda _, key=key: self.cycle_material(key, 1))
+        self.bind_sidebar_wheel(panel)
+        side_canvas.bind("<MouseWheel>", self.scroll_materials)
         self.canvas = tk.Canvas(body, bg=MATERIALS["empty"][1], highlightthickness=0, takefocus=True)
         self.canvas.pack(side="left", fill="both", expand=True)
         self.image_id = self.canvas.create_image(0, 0, anchor="nw")
@@ -122,6 +126,29 @@ class SandboxView(tk.Frame):
         for key, button in self.buttons.items():
             button.configure(bg=self.colors["accent_soft"] if key == material else self.colors["field"],
                              relief="sunken" if key == material else "flat")
+
+    def bind_sidebar_wheel(self, widget):
+        widget.bind("<MouseWheel>", self.scroll_materials)
+        for child in widget.winfo_children():
+            self.bind_sidebar_wheel(child)
+
+    def scroll_materials(self, event):
+        self.side_canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+        return "break"
+
+    def cycle_material(self, current, direction):
+        keys = list(self.buttons)
+        key = keys[(keys.index(current) + direction) % len(keys)]
+        self.select(key)
+        self.buttons[key].focus_set()
+        # 선택한 버튼이 스크롤 영역 밖이면 해당 행을 표시한다.
+        button = self.buttons[key]
+        top = button.master.winfo_y()
+        panel_height = max(1, button.master.master.winfo_height())
+        low, high = self.side_canvas.yview()
+        if top / panel_height < low or (top + button.winfo_height()) / panel_height > high:
+            self.side_canvas.yview_moveto(max(0, (top - 8) / panel_height))
+        return "break"
 
     def position(self, event):
         x = int((event.x - self.offset[0]) // self.scale)
@@ -248,6 +275,11 @@ class SandboxView(tk.Frame):
         self.status.set(info + "\n" + self.message)
 
     def close(self, event):
-        if event.widget is self and self.tick_id is not None:
-            self.after_cancel(self.tick_id)
-            self.tick_id = None
+        if event.widget is self:
+            if self.tick_id is not None:
+                self.after_cancel(self.tick_id)
+                self.tick_id = None
+            # Tk 객체는 종료 뒤 작업 스레드의 GC에서 정리되지 않게
+            # 소유한 UI 스레드에서 마지막 참조를 해제한다.
+            self.photo = None
+            self.brush_size = self.speed = self.status = self.material_label = None

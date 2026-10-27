@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
 from pathlib import Path
 import random
 
@@ -124,9 +123,9 @@ class Sandbox:
             if material == "water":
                 change = "steam" if temperature >= 100 else "ice" if temperature <= 0 else None
             elif material == "saltwater" and temperature >= 100:
-                change = "steam"
                 for j in near:
                     if self.cells[j] == "empty":
+                        change = "steam"
                         self._set(j, "salt")
                         touched.add(j)
                         break
@@ -232,7 +231,7 @@ class Sandbox:
         if path.stat().st_size > 5_000_000:
             raise ValueError("저장 파일이 너무 큽니다.")
         data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict) or data.get("version") != 1:
+        if not isinstance(data, dict) or type(data.get("version")) is not int or data["version"] != 1:
             raise ValueError("지원하지 않는 저장 형식입니다.")
         w, h = data.get("width"), data.get("height")
         if type(w) is not int or type(h) is not int:
@@ -243,7 +242,7 @@ class Sandbox:
                 raise ValueError("입자 데이터 길이가 올바르지 않습니다.")
         if any(not isinstance(m, str) or m not in MATERIALS for m in data["cells"]):
             raise ValueError("알 수 없는 재료가 포함되어 있습니다.")
-        if any(type(t) not in (float, int) or not math.isfinite(t) or not -273 <= t <= 2000 for t in data["heat"]):
+        if any(type(t) not in (float, int) or not -273 <= t <= 2000 for t in data["heat"]):
             raise ValueError("온도 데이터가 올바르지 않습니다.")
         if any(type(t) is not int or not 0 <= t <= 65 for t in data["life"]):
             raise ValueError("입자 수명이 올바르지 않습니다.")
