@@ -77,6 +77,23 @@ class WindowsTTS:
         result = json.loads(self._run({"action": "voices"}) or "[]")
         return result if isinstance(result, list) else [result]
 
+    def play_once(self, text, output, voice="", rate=0, volume=100):
+        from app.services.soundboard_audio import AudioDriver
+
+        if not output.get("id"):
+            raise ValueError("일회용 음성을 출력할 장치를 선택하세요.")
+        # 재생 스트림이 닫힌 뒤 정상 종료·오류·화면 종료 모두 임시 WAV를 제거한다.
+        with tempfile.TemporaryDirectory(prefix="toolbox-tts-once-") as directory:
+            source = Path(directory) / "voice.wav"
+            self.generate(text, source, voice, rate, volume)
+            if self.cancel.is_set():
+                raise RuntimeError("일회용 음성 출력을 취소했습니다.")
+            ready, start = threading.Event(), threading.Event()
+            start.set()
+            # 음성 생성 단계에서 볼륨을 적용했으므로 재생 배율은 1이다.
+            AudioDriver().play(source, output, ready, start, self.cancel, lambda _identity: 1.0)
+        return output["name"]
+
     def add_to_soundboard(self, text, title, voice="", rate=0, volume=100):
         from app.services.soundboard_audio import AudioDriver
         from app.services.soundboard_store import SoundboardStore

@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import filedialog, ttk
 
 from app.palette import palette
+from app.services.soundboard_audio import AudioDriver
 from app.services.tts import WindowsTTS
 from app.tool_registry import ToolSpec
 from app.ui import RoundedButton
@@ -19,6 +20,8 @@ class TTSTool(tk.Frame):
         self.closed = False
         self.busy = True
         self.voices = []
+        self.devices = []
+        self.discovering = False
         self.status = tk.StringVar(value="설치된 음성을 확인하는 중…")
         self.rate = tk.IntVar(value=0)
         self.volume = tk.IntVar(value=100)
@@ -41,13 +44,22 @@ class TTSTool(tk.Frame):
             tk.Scale(controls, variable=variable, from_=low, to=high, orient="horizontal", bg=colors["panel"], fg=colors["text"], highlightthickness=0).grid(row=row, column=1, sticky="ew")
         tk.Label(controls, text="사운드 제목", bg=colors["panel"], fg=colors["text"]).grid(row=3, column=0, sticky="w", padx=(0, 12))
         tk.Entry(controls, textvariable=self.title, bg=colors["field"], fg=colors["text"], insertbackground=colors["text"]).grid(row=3, column=1, sticky="ew", pady=8)
+        tk.Label(controls, text="일회용 출력 장치", bg=colors["panel"], fg=colors["text"]).grid(row=4, column=0, sticky="w", padx=(0, 12))
+        output_row = tk.Frame(controls, bg=colors["panel"])
+        output_row.grid(row=4, column=1, sticky="ew", pady=8)
+        output_row.columnconfigure(0, weight=1)
+        self.output_device = ttk.Combobox(output_row, state="disabled", width=20)
+        self.output_device.grid(row=0, column=0, sticky="ew")
+        RoundedButton(output_row, "새로고침", self.refresh_devices, colors, compact=True, width=90).grid(row=0, column=1, padx=(8, 0))
         actions = tk.Frame(controls, bg=colors["panel"])
-        actions.grid(row=4, column=0, columnspan=2, sticky="e")
+        actions.grid(row=5, column=0, columnspan=2, sticky="e")
         self.generate_button = RoundedButton(actions, "WAV 저장", self.generate, colors, compact=True)
         self.generate_button.pack(side="left", padx=(0, 8))
         RoundedButton(actions, "사운드보드에 추가", lambda: self.generate(True), colors, compact=True, accent=True).pack(side="left")
+        RoundedButton(controls, "일회용 출력 (재생 후 폐기)", lambda: self.generate(play_once=True), colors, compact=True, accent=True).grid(row=6, column=0, columnspan=2, sticky="e", pady=(8, 0))
         tk.Label(self, textvariable=self.status, bg=colors["panel"], fg=colors["muted"], wraplength=480, justify="left").grid(row=4, column=0, sticky="ew", padx=18, pady=(0, 16))
         self.submit("voices", self.engine.voices)
+        self.refresh_devices()
         self.timer = self.after(50, self.poll)
 
     def submit(self, kind, command):
@@ -59,7 +71,13 @@ class TTSTool(tk.Frame):
                 results.put((kind, None, str(exc)))
         self.executor.submit(run)
 
-    def generate(self, add_to_soundboard=False):
+    def refresh_devices(self):
+        if self.closed or self.discovering:
+            return
+        self.discovering = True
+        self.submit("devices", AudioDriver().devices)
+
+    def generate(self, add_to_soundboard=False, play_once=False):
         if self.closed or self.busy:
             return
         text = self.text.get("1.0", "end-1c")
@@ -69,7 +87,13 @@ class TTSTool(tk.Frame):
         if not self.voices:
             self.status.set("사용 가능한 Windows 음성이 없습니다. Windows 설정에서 음성을 설치한 뒤 도구를 다시 여세요.")
             return
-        if add_to_soundboard:
+        if play_once:
+            selected = self.output_device.current()
+            if selected < 0 or selected >= len(self.devices):
+                self.status.set("일회용 출력 장치에서 CABLE Input 등 사용할 장치를 선택하세요.")
+                return
+            output = dict(self.devices[selected])
+        elif add_to_soundboard:
             title = self.title.get().strip() or text.strip().splitlines()[0][:100]
             if len(title) > 100:
                 self.status.set("사운드 제목은 1~100자로 입력하세요.")
@@ -81,16 +105,38 @@ class TTSTool(tk.Frame):
         voice = self.voices[self.voice.current()]["name"]
         rate, volume = self.rate.get(), self.volume.get()
         self.busy = True
-        self.status.set("음성 생성 및 사운드보드 등록 중…" if add_to_soundboard else "음성 생성 중… (화면을 떠나면 취소됩니다)")
         engine = self.engine
-        if add_to_soundboard:
+        if play_once:
+            self.status.set("일회용 음성 생성·출력 중: " + output["name"] + " · 재생 후 자동 폐기")
+            self.submit("played", lambda: engine.play_once(text, output, voice, rate, volume))
+        elif add_to_soundboard:
+            self.status.set("음성 생성 및 사운드보드 등록 중…")
             self.submit("added", lambda: engine.add_to_soundboard(text, title, voice, rate, volume))
         else:
+            self.status.set("음성 생성 중… (화면을 떠나면 취소됩니다)")
             self.submit("generated", lambda: engine.generate(text, target, voice, rate, volume))
 
     def poll(self):
         while not self.results.empty():
             kind, result, error = self.results.get_nowait()
+            if kind == "devices":
+                self.discovering = False
+                if error:
+                    self.status.set("출력 장치 조회 실패: " + error)
+                else:
+                    selected = self.output_device.current()
+                    old_id = self.devices[selected]["id"] if 0 <= selected < len(self.devices) else None
+                    self.devices = result
+                    self.output_device.configure(values=[f"{i+1}. {d['name']}" for i, d in enumerate(result)], state="readonly" if result else "disabled")
+                    self.output_device.set("")
+                    found = next((i for i, d in enumerate(result) if d["id"] == old_id), None)
+                    if found is not None:
+                        self.output_device.current(found)
+                    elif old_id:
+                        self.status.set("선택한 출력 장치가 없습니다. 장치를 다시 선택하세요.")
+                    if not result:
+                        self.status.set("사용 가능한 출력 장치가 없습니다. 케이블 장치를 연결한 뒤 새로고침하세요.")
+                continue
             self.busy = False
             if error:
                 self.status.set("음성 처리 실패: " + error)
@@ -102,6 +148,8 @@ class TTSTool(tk.Frame):
                 self.status.set("텍스트를 입력한 뒤 WAV 저장 또는 사운드보드에 추가를 누르세요." if result else "사용 가능한 Windows 음성이 없습니다. Windows 설정에서 음성을 설치하세요.")
             elif kind == "added":
                 self.status.set("사운드보드에 추가 완료: " + result + " · 게임 → 사운드보드에서 재생하세요.")
+            elif kind == "played":
+                self.status.set("일회용 출력 완료: " + result + " · 임시 음성 파일 폐기 완료")
             else:
                 self.status.set("저장 완료: " + result)
         self.timer = self.after(50, self.poll)
