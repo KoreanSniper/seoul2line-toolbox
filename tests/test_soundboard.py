@@ -270,6 +270,65 @@ class AudioTests(unittest.TestCase):
 
 
 class UITests(unittest.TestCase):
+    def prepare_delayed(self):
+        source = Path(self.temp.name) / "delay.wav"
+        source.write_bytes(b"valid")
+        identities = [self.store.add(), self.store.add()]
+        for identity in identities:
+            self.store.register_file(identity, source, self.driver.validate)
+        self.tool.outputs = [dict(OUTPUTS[0])]
+        self.tool.reload()
+        self.tool.delay.set("0.2")
+        return identities
+
+    def test_delayed_play_waits_then_starts(self):
+        first, _ = self.prepare_delayed()
+        self.tool.click(first)
+        self.assertIsNone(self.tool.audio.current)
+        self.assertEqual(self.tool.pending, first)
+        self.pump(.08)
+        self.assertFalse(self.driver.started)
+        self.pump(.3)
+        self.assertEqual(self.tool.audio.current, first)
+        wait_for(lambda: bool(self.driver.started))
+        self.assertTrue(self.driver.started)
+        self.assertIsNone(self.tool.pending)
+
+    def test_delayed_reclick_replace_stop_edit_and_destroy_cancel(self):
+        first, second = self.prepare_delayed()
+        self.tool.click(first)
+        self.tool.click(first)
+        self.assertIsNone(self.tool.pending)
+        self.tool.click(first)
+        self.tool.click(second)
+        self.assertEqual(self.tool.pending, second)
+        self.tool.stop()
+        self.pump(.25)
+        self.assertFalse(self.driver.started)
+        self.tool.click(first)
+        self.tool.toggle_edit()
+        self.assertIsNone(self.tool.pending)
+        self.tool.toggle_edit()
+        self.tool.click(first)
+        timer = self.tool.play_timer
+        self.tool.destroy()
+        self.assertNotIn(timer, self.root.tk.call("after", "info"))
+        self.assertIsNone(self.tool.pending)
+
+    def test_delay_invalid_values_and_file_removed_while_waiting(self):
+        first, _ = self.prepare_delayed()
+        for value in ("NaN", "inf", "-1", "3601", "abc"):
+            self.tool.delay.set(value)
+            self.tool.click(first)
+            self.assertIsNone(self.tool.pending)
+            self.assertIsNone(self.tool.audio.current)
+        self.tool.delay.set("0.1")
+        self.tool.click(first)
+        self.store.resolve(self.tool.items[0]["path"]).unlink()
+        self.pump(.2)
+        self.assertIn("파일이 없습니다", self.tool.status.get())
+        self.assertFalse(self.driver.started)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.store = SoundboardStore(self.temp.name)
@@ -379,6 +438,7 @@ class UITests(unittest.TestCase):
         self.tool.device_scales[0].set(23)
         self.pump()
         self.assertFalse(self.tool.editing)
+        wait_for(lambda: ("physical", .23) in self.driver.samples)
         self.assertIn(("physical", .23), self.driver.samples)
         self.assertEqual(self.store.settings()[1][0]["volume"], 23)
         self.driver.finish.set()

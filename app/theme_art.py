@@ -16,7 +16,7 @@ TOOL_ICONS = {
     'developer.git': 'git', 'developer.terminal': 'terminal',
     'developer.utilities': 'convert', 'developer.scratchpad': 'notebook',
     'network.status': 'network', 'network.lan_remote': 'lan',
-    'files.manager': 'folder', 'files.converter': 'convert', 'files.cursor_editor': 'cursor',
+    'files.manager': 'folder', 'files.converter': 'convert', 'files.cursor_editor': 'cursor', 'files.tts': 'music',
     'files.clipboard_history': 'clipboard', 'files.diff': 'diff',
     'files.process_manager': 'process', 'files.screenshot': 'crop',
     'automation.editor': 'workflow', 'automation.history': 'history', 'automation.manager': 'list',

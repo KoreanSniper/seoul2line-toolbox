@@ -1,7 +1,9 @@
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 import queue
+import math
 import threading
+import time
 import tkinter as tk
 from tkinter import filedialog, ttk
 
@@ -30,6 +32,10 @@ class SoundboardTool(tk.Frame):
         self.entries = {}
         self.tiles = []
         self.columns = 0
+        self.delay = tk.StringVar(value="0")
+        self.pending = None
+        self.play_timer = None
+        self.play_deadline = 0
         self.status = tk.StringVar(value="개인설정에서 사운드와 출력 장치를 추가하세요.")
         try:
             self.store = store or SoundboardStore()
@@ -75,6 +81,12 @@ class SoundboardTool(tk.Frame):
         self.volume_scale.grid(row=2, column=0, columnspan=3, sticky="ew")
         self.output_summary = self.label(header, "")
         self.output_summary.grid(row=3, column=0, columnspan=3, sticky="ew")
+        delay_row = tk.Frame(header, bg=self.cget("bg"))
+        delay_row.grid(row=4, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        self.label(delay_row, "재생 대기 (초)").pack(side="left")
+        tk.Spinbox(delay_row, from_=0, to=3600, increment=.5, textvariable=self.delay, width=8,
+                   bg=self.colors["field"], fg=self.colors["text"], insertbackground=self.colors["text"]).pack(side="left", padx=8)
+        self.label(delay_row, "0 = 즉시 · 최대 3,600초").pack(side="left")
 
         self.settings_panel = tk.Frame(self, bg=self.cget("bg"))
         self.settings_panel.grid(row=1, column=0, sticky="ew", padx=18)
@@ -168,7 +180,7 @@ class SoundboardTool(tk.Frame):
 
     def sync_state(self):
         for identity, button in self.buttons.items():
-            button.set_active(identity == self.audio.current and not self.editing)
+            button.set_active(identity in (self.audio.current, self.pending) and not self.editing)
         current_names = {d["id"]: d["name"] for d in self.devices}
         names = [f"{current_names.get(o['id'], o['name'])} ({o['volume']:g}%)" for o in self.outputs]
         self.output_summary.configure(text="출력: " + (" · ".join(names) or "개인설정에서 장치를 선택하세요"), wraplength=max(180, self.winfo_width()-40))
@@ -261,19 +273,60 @@ class SoundboardTool(tk.Frame):
                 self.submit("registered", partial(self.store.register_file, identity, source, validate, self.files_cancel))
             return
         try:
+            if self.pending == identity or self.audio.current == identity:
+                self.stop()
+                return
+            try:
+                seconds = float(self.delay.get())
+            except ValueError:
+                raise ValueError("재생 대기는 0~3,600초로 입력하세요.") from None
+            if not math.isfinite(seconds) or not 0 <= seconds <= 3600:
+                raise ValueError("재생 대기는 0~3,600초로 입력하세요.")
             if not item["path"]:
                 raise ValueError("개인설정에서 이 버튼의 오디오 파일을 선택하세요.")
             if not self.outputs:
                 raise ValueError("개인설정에서 출력 장치를 1~2개 선택하세요.")
             path = self.store.resolve(item["path"])
-            self.audio.toggle(identity, path, [dict(o) for o in self.outputs])
-            self.status.set("재생 요청: " + item["title"] if self.audio.current else "정지")
+            if not path.is_file():
+                raise ValueError("오디오 파일이 없습니다. 개인설정에서 다시 선택하세요.")
+            self.stop()
+            if seconds:
+                self.pending = identity
+                self.play_deadline = time.monotonic() + seconds
+                self.play_timer = self.after(max(1, math.ceil(seconds * 1000)), lambda: self.play_pending(identity))
+                self.status.set(f"{seconds:g}초 후 재생: {item['title']} (다시 누르면 취소)")
+            else:
+                self.play_item(identity)
         except Exception as exc:
             self.status.set(str(exc))
         self.sync_state()
 
     def stop(self):
+        if self.play_timer is not None:
+            self.after_cancel(self.play_timer)
+            self.play_timer = None
+        self.pending = None
         self.audio.stop()
+        self.status.set("정지")
+        self.sync_state()
+
+    def play_pending(self, identity):
+        self.play_timer = None
+        if self.closed or self.pending != identity:
+            return
+        self.pending = None
+        self.play_item(identity)
+
+    def play_item(self, identity):
+        try:
+            item = next(i for i in self.items if i["id"] == identity)
+            path = self.store.resolve(item["path"])
+            if not path.is_file():
+                raise ValueError("오디오 파일이 없습니다. 개인설정에서 다시 선택하세요.")
+            self.audio.toggle(identity, path, [dict(o) for o in self.outputs])
+            self.status.set("재생 요청: " + item["title"])
+        except Exception as exc:
+            self.status.set("재생 실패: " + str(exc))
         self.sync_state()
 
     def submit(self, kind, command):
@@ -341,6 +394,10 @@ class SoundboardTool(tk.Frame):
             self.sync_state()
 
     def poll(self):
+        if self.pending is not None:
+            item = next((i for i in self.items if i["id"] == self.pending), None)
+            if item:
+                self.status.set(f"{max(0, self.play_deadline-time.monotonic()):.1f}초 후 재생: {item['title']} (다시 누르면 취소)")
         self.device_refresh_ticks += 1
         if self.device_refresh_ticks >= 100:
             self.device_refresh_ticks = 0
@@ -369,12 +426,14 @@ class SoundboardTool(tk.Frame):
         if self.closed:
             return
         self.closed = True
+        self.stop()
         self.files_cancel.set()
         self.save_titles()
         self.audio.close()
         self.executor.shutdown(wait=False, cancel_futures=True)
         self.after_cancel(self.timer)
         super().destroy()
+        self.status = self.delay = None
 
 
 def build(parent, app):
