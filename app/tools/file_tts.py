@@ -5,7 +5,7 @@ from tkinter import filedialog, ttk
 
 from app.palette import palette
 from app.services.soundboard_audio import AudioDriver
-from app.services.tts import WindowsTTS
+from app.services.tts import VOICE_EFFECTS, WindowsTTS
 from app.tool_registry import ToolSpec
 from app.ui import RoundedButton
 
@@ -43,11 +43,15 @@ class TTSTool(tk.Frame):
         self.voice.grid(row=0, column=1, sticky="ew")
         for row, variable, low, high in ((1, self.rate, -10, 10), (2, self.volume, 0, 100)):
             tk.Scale(controls, variable=variable, from_=low, to=high, orient="horizontal", bg=colors["panel"], fg=colors["text"], highlightthickness=0).grid(row=row, column=1, sticky="ew")
-        tk.Label(controls, text="사운드 제목", bg=colors["panel"], fg=colors["text"]).grid(row=3, column=0, sticky="w", padx=(0, 12))
-        tk.Entry(controls, textvariable=self.title, bg=colors["field"], fg=colors["text"], insertbackground=colors["text"]).grid(row=3, column=1, sticky="ew", pady=8)
-        tk.Label(controls, text="일회용 출력 장치", bg=colors["panel"], fg=colors["text"]).grid(row=4, column=0, sticky="w", padx=(0, 12))
+        tk.Label(controls, text="목소리 변형", bg=colors["panel"], fg=colors["text"]).grid(row=3, column=0, sticky="w", padx=(0, 12))
+        self.effect = ttk.Combobox(controls, state="readonly", values=list(VOICE_EFFECTS.values()))
+        self.effect.current(0)
+        self.effect.grid(row=3, column=1, sticky="ew", pady=8)
+        tk.Label(controls, text="사운드 제목", bg=colors["panel"], fg=colors["text"]).grid(row=4, column=0, sticky="w", padx=(0, 12))
+        tk.Entry(controls, textvariable=self.title, bg=colors["field"], fg=colors["text"], insertbackground=colors["text"]).grid(row=4, column=1, sticky="ew", pady=8)
+        tk.Label(controls, text="일회용 출력 장치", bg=colors["panel"], fg=colors["text"]).grid(row=5, column=0, sticky="w", padx=(0, 12))
         output_row = tk.Frame(controls, bg=colors["panel"])
-        output_row.grid(row=4, column=1, sticky="ew", pady=8)
+        output_row.grid(row=5, column=1, sticky="ew", pady=8)
         output_row.columnconfigure(0, weight=1)
         self.output_device = ttk.Combobox(output_row, state="disabled", width=20)
         self.output_device.grid(row=0, column=0, sticky="ew")
@@ -55,11 +59,11 @@ class TTSTool(tk.Frame):
         refresh_button.configure(width=90)
         refresh_button.grid(row=0, column=1, padx=(8, 0))
         actions = tk.Frame(controls, bg=colors["panel"])
-        actions.grid(row=5, column=0, columnspan=2, sticky="e")
+        actions.grid(row=6, column=0, columnspan=2, sticky="e")
         self.generate_button = RoundedButton(actions, "WAV 저장", self.generate, colors, compact=True)
         self.generate_button.pack(side="left", padx=(0, 8))
         RoundedButton(actions, "사운드보드에 추가", lambda: self.generate(True), colors, compact=True, accent=True).pack(side="left")
-        RoundedButton(controls, "일회용 출력 (재생 후 폐기)", lambda: self.generate(play_once=True), colors, compact=True, accent=True).grid(row=6, column=0, columnspan=2, sticky="e", pady=(8, 0))
+        RoundedButton(controls, "일회용 출력 (재생 후 폐기)", lambda: self.generate(play_once=True), colors, compact=True, accent=True).grid(row=7, column=0, columnspan=2, sticky="e", pady=(8, 0))
         tk.Label(self, textvariable=self.status, bg=colors["panel"], fg=colors["muted"], wraplength=480, justify="left").grid(row=4, column=0, sticky="ew", padx=18, pady=(0, 16))
         self.submit("voices", self.engine.voices)
         self.refresh_devices()
@@ -107,17 +111,21 @@ class TTSTool(tk.Frame):
                 return
         voice = self.voices[self.voice.current()]["name"]
         rate, volume = self.rate.get(), self.volume.get()
+        effect = next((key for key, label in VOICE_EFFECTS.items() if label == self.effect.get()), None)
+        if effect is None:
+            self.status.set("목소리 변형을 선택하세요.")
+            return
         self.busy = True
         engine = self.engine
         if play_once:
             self.status.set("일회용 음성 생성·출력 중: " + output["name"] + " · 재생 후 자동 폐기")
-            self.submit("played", lambda: engine.play_once(text, output, voice, rate, volume))
+            self.submit("played", lambda: engine.play_once(text, output, voice, rate, volume, effect))
         elif add_to_soundboard:
             self.status.set("음성 생성 및 사운드보드 등록 중…")
-            self.submit("added", lambda: engine.add_to_soundboard(text, title, voice, rate, volume))
+            self.submit("added", lambda: engine.add_to_soundboard(text, title, voice, rate, volume, effect))
         else:
             self.status.set("음성 생성 중… (화면을 떠나면 취소됩니다)")
-            self.submit("generated", lambda: engine.generate(text, target, voice, rate, volume))
+            self.submit("generated", lambda: engine.generate(text, target, voice, rate, volume, effect))
 
     def poll(self):
         while not self.results.empty():

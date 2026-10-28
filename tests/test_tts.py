@@ -9,6 +9,8 @@ import unittest
 from unittest.mock import patch
 import wave
 
+import numpy as np
+import soundfile as sf
 from app.palette import ThemeMode
 from app.services.tts import WindowsTTS
 from app.services.soundboard_store import SoundboardStore
@@ -23,6 +25,65 @@ def write_wave(path):
 
 
 class TTSTests(unittest.TestCase):
+    def test_robot_preserves_duration_channels_and_silence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for channels in (1, 2):
+                rate = 22050
+                signal = .5 * np.sin(2 * np.pi * 440 * np.arange(rate) / rate)
+                signal[:100] = 0
+                samples = np.repeat(signal[:, None], channels, axis=1)
+                target = Path(directory) / "robot.wav"
+                engine = WindowsTTS()
+                with patch.object(engine, "_run", side_effect=lambda p: sf.write(p["path"], samples, rate, subtype="PCM_16")):
+                    engine.generate("로봇", target, effect="robot")
+                actual, actual_rate = sf.read(target, always_2d=True)
+                self.assertEqual(actual_rate, rate)
+                self.assertEqual(actual.shape, samples.shape)
+                self.assertLessEqual(np.max(np.abs(actual)), .501)
+                np.testing.assert_array_equal(actual[:100], 0)
+                self.assertGreater(np.max(np.abs(actual - samples)), .2)
+                # 원본 440Hz에 더해 링 변조의 350/530Hz 성분을 확인한다.
+                spectrum = np.abs(np.fft.rfft(actual[:, 0]))
+                self.assertGreater(spectrum[350], spectrum[440])
+                self.assertGreater(spectrum[530], spectrum[440])
+                self.assertEqual(list(Path(directory).iterdir()), [target])
+
+    def test_effect_failure_and_late_cancel_preserve_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "voice.wav"
+            target.write_bytes(b"original")
+            for outcome in ("failure", "cancel"):
+                engine = WindowsTTS()
+                def effect(source, destination):
+                    write_wave(destination)
+                    if outcome == "failure":
+                        raise OSError("변형 저장 실패")
+                    engine.close()
+                with patch.object(engine, "_run", side_effect=lambda p: write_wave(p["path"])), patch.object(engine, "_robot_effect", side_effect=effect):
+                    with self.assertRaises((OSError, RuntimeError)):
+                        engine.generate("테스트", target, effect="robot")
+                self.assertEqual(target.read_bytes(), b"original")
+                self.assertEqual(list(Path(directory).iterdir()), [target])
+            with patch.object(engine, "_run") as run:
+                with self.assertRaises(ValueError):
+                    engine.generate("테스트", target, effect="unknown")
+                run.assert_not_called()
+
+    def test_robot_reaches_one_time_output_and_soundboard(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SoundboardStore(directory)
+            engine = WindowsTTS()
+            samples = .4 * np.sin(2 * np.pi * 440 * np.arange(22050) / 22050)
+            def verify(path, *args):
+                actual, rate = sf.read(path)
+                self.assertEqual(rate, 22050)
+                self.assertGreater(np.max(np.abs(actual - samples)), .2)
+            with patch.object(engine, "_run", side_effect=lambda p: sf.write(p["path"], samples, 22050)), patch("app.services.soundboard_store.SoundboardStore", return_value=store), patch("app.services.soundboard_audio.AudioDriver.play", side_effect=verify) as play:
+                engine.play_once("로봇", {"id": "cable", "name": "케이블"}, effect="robot")
+                play.assert_called_once()
+                engine.add_to_soundboard("로봇", "변형 음성", effect="robot")
+                verify(store.resolve(store.items()[0]["path"]))
+
     def test_one_time_output_cleanup_success_failure_and_cancel(self):
         output = {"id": "cable-id", "name": "CABLE Input", "channels": 2}
         for outcome in ("success", "failure", "cancel"):
@@ -219,15 +280,17 @@ class TTSUITests(unittest.TestCase):
             self.assertEqual(tool.output_device.current(), 0)
             tool.rate.set(2)
             tool.volume.set(30)
+            tool.effect.current(1)
             with patch("app.tools.file_tts.filedialog.asksaveasfilename", side_effect=AssertionError("일회용 출력에 저장 창이 열림")):
                 tool.generate(play_once=True)
                 until(lambda: not tool.busy)
-            self.assertEqual(engine.calls[-1], ("played", ("한글 첫 줄\n두 번째 줄", self.devices[0], "한국어", 2, 30)))
+            self.assertEqual(engine.calls[-1], ("played", ("한글 첫 줄\n두 번째 줄", self.devices[0], "한국어", 2, 30, "robot")))
             self.assertIn("폐기 완료", tool.status.get())
             tool.generate(True)
             until(lambda: not tool.busy)
             self.assertEqual(engine.calls[-1][0], "added")
             self.assertEqual(engine.calls[-1][1][1], "한글 첫 줄")
+            self.assertEqual(engine.calls[-1][1][-1], "robot")
             self.devices = [{"id": "other", "name": "동일 이름", "channels": 2}]
             tool.refresh_devices()
             until(lambda: not tool.discovering)
@@ -257,6 +320,7 @@ class TTSUITests(unittest.TestCase):
                         time.sleep(.005)
                 pump()
                 self.assertEqual(tool.voice.current(), 1)
+                self.assertEqual(tool.effect.get(), "원본")
                 tool.generate()
                 self.assertIn("입력", tool.status.get())
                 tool.text.insert("1.0", "안녕하세요.")
@@ -266,7 +330,7 @@ class TTSUITests(unittest.TestCase):
                 with patch("app.tools.file_tts.filedialog.asksaveasfilename", return_value="한글.wav"):
                     tool.generate()
                 pump()
-                self.assertEqual(engine.calls[0], ("안녕하세요.", "한글.wav", "한국어", 0, 100))
+                self.assertEqual(engine.calls[0], ("안녕하세요.", "한글.wav", "한국어", 0, 100, "none"))
                 self.assertIn("저장 완료", tool.status.get())
                 timer = tool.timer
                 tool.destroy()

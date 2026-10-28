@@ -11,6 +11,9 @@ import time
 import wave
 
 
+VOICE_EFFECTS = {"none": "원본", "robot": "로봇"}
+
+
 SCRIPT = r"""
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
@@ -77,7 +80,7 @@ class WindowsTTS:
         result = json.loads(self._run({"action": "voices"}) or "[]")
         return result if isinstance(result, list) else [result]
 
-    def play_once(self, text, output, voice="", rate=0, volume=100):
+    def play_once(self, text, output, voice="", rate=0, volume=100, effect="none"):
         from app.services.soundboard_audio import AudioDriver
 
         if not output.get("id"):
@@ -85,7 +88,7 @@ class WindowsTTS:
         # 재생 스트림이 닫힌 뒤 정상 종료·오류·화면 종료 모두 임시 WAV를 제거한다.
         with tempfile.TemporaryDirectory(prefix="toolbox-tts-once-") as directory:
             source = Path(directory) / "voice.wav"
-            self.generate(text, source, voice, rate, volume)
+            self.generate(text, source, voice, rate, volume, effect)
             if self.cancel.is_set():
                 raise RuntimeError("일회용 음성 출력을 취소했습니다.")
             ready, start = threading.Event(), threading.Event()
@@ -94,7 +97,7 @@ class WindowsTTS:
             AudioDriver().play(source, output, ready, start, self.cancel, lambda _identity: 1.0)
         return output["name"]
 
-    def add_to_soundboard(self, text, title, voice="", rate=0, volume=100):
+    def add_to_soundboard(self, text, title, voice="", rate=0, volume=100, effect="none"):
         from app.services.soundboard_audio import AudioDriver
         from app.services.soundboard_store import SoundboardStore
 
@@ -103,7 +106,7 @@ class WindowsTTS:
             raise ValueError("사운드 제목은 1~100자로 입력하세요.")
         with tempfile.TemporaryDirectory(prefix="toolbox-tts-") as directory:
             source = Path(directory) / "voice.wav"
-            self.generate(text, source, voice, rate, volume)
+            self.generate(text, source, voice, rate, volume, effect)
             if self.cancel.is_set():
                 raise RuntimeError("음성 생성을 취소했습니다.")
             store = SoundboardStore()
@@ -120,16 +123,37 @@ class WindowsTTS:
                 raise
         return title
 
-    def generate(self, text, target, voice="", rate=0, volume=100):
+    def _robot_effect(self, source, target):
+        """90Hz 링 변조로 길이·출력 형식·볼륨 상한을 유지하는 금속성 효과."""
+        import numpy as np
+        import soundfile as sf
+
+        with sf.SoundFile(source) as original, sf.SoundFile(
+                target, mode="w", samplerate=original.samplerate,
+                channels=original.channels, subtype="PCM_16", format="WAV") as result:
+            offset = 0
+            for samples in original.blocks(blocksize=16384, dtype="float32", always_2d=True):
+                if self.cancel.is_set():
+                    raise RuntimeError("음성 변형을 취소했습니다.")
+                # 블록 경계에서도 위상을 이어가며 무음은 그대로 유지한다.
+                phase = (np.arange(len(samples)) + offset) * (2 * np.pi * 90 / original.samplerate)
+                carrier = .25 + .75 * np.sin(phase)
+                result.write(np.clip(samples * carrier[:, None], -1, 1))
+                offset += len(samples)
+
+    def generate(self, text, target, voice="", rate=0, volume=100, effect="none"):
         if not text.strip() or len(text) > 10000:
             raise ValueError("텍스트를 1~10,000자 입력하세요.")
         if not -10 <= rate <= 10 or not 0 <= volume <= 100:
             raise ValueError("속도는 -10~10, 볼륨은 0~100 범위로 입력하세요.")
+        if effect not in VOICE_EFFECTS:
+            raise ValueError("지원하지 않는 목소리 변형입니다.")
         target = Path(target).resolve()
         if target.suffix.lower() != ".wav":
             raise ValueError("저장 파일 확장자는 .wav여야 합니다.")
         handle, temporary = tempfile.mkstemp(prefix=".tts-", suffix=".wav", dir=target.parent)
         os.close(handle)
+        processed = temporary + ".effect.wav"
         try:
             self._run({"action": "generate", "text": text, "voice": voice,
                        "rate": rate, "volume": volume, "path": temporary})
@@ -138,7 +162,13 @@ class WindowsTTS:
             with wave.open(temporary, "rb") as sound:
                 if sound.getnframes() <= 0:
                     raise ValueError("음성 엔진이 빈 파일을 생성했습니다.")
+            if effect == "robot":
+                self._robot_effect(temporary, processed)
+                os.replace(processed, temporary)
+            if self.cancel.is_set():
+                raise RuntimeError("음성 생성을 취소했습니다.")
             os.replace(temporary, target)
             return str(target)
         finally:
             Path(temporary).unlink(missing_ok=True)
+            Path(processed).unlink(missing_ok=True)
