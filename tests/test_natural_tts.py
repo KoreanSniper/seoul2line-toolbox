@@ -36,6 +36,9 @@ class NaturalTTSTests(unittest.TestCase):
             patcher = patch(module + ".data_directory", return_value=self.root)
             patcher.start()
             self.addCleanup(patcher.stop)
+        devices = patch("app.tools.file_tts.AudioDriver.devices", return_value=[])
+        devices.start()
+        self.addCleanup(devices.stop)
 
     def model(self, content=b"valid model"):
         model = NeuralModel(self.root / "models")
@@ -209,6 +212,41 @@ class NaturalTTSTests(unittest.TestCase):
                 gc.collect()
         finally:
             root.destroy()
+
+    def test_small_window_scroll_keeps_text_and_model_controls_accessible(self):
+        root = tk.Tk()
+        root.geometry("520x500")
+        engine = Mock()
+        engine.cancel = threading.Event()
+        engine.voices.return_value = voice_records()
+        engine.natural_model_status.return_value = "자연음성 설치 필요"
+        with patch("app.tools.file_tts.AudioDriver.devices", return_value=[]):
+            tool = TTSTool(root, SimpleNamespace(dark_mode=ThemeMode("dark")), engine)
+            tool.pack(fill="both", expand=True)
+            try:
+                root.update()
+                self.assertTrue(tool.text.winfo_ismapped())
+                self.assertGreater(tool.text.winfo_height(), 40)
+                self.assertLessEqual(tool.source_canvas.winfo_width(), tool.winfo_width())
+                tool.source_canvas.yview_moveto(1)
+                root.update()
+                self.assertGreater(tool.source_canvas.yview()[0], 0)
+                tool.text.insert("1.0", "스크롤 후에도 유지")
+                tool.source_canvas.yview_moveto(0)
+                self.assertEqual(tool.text.get("1.0", "end-1c"), "스크롤 후에도 유지")
+            finally:
+                tool.destroy()
+                tool.executor.shutdown(wait=True)
+                root.destroy()
+                del tool
+                gc.collect()
+
+    def test_cpu_runtime_probe_does_not_access_network(self):
+        from app.services.natural_tts_probe import probe
+        with patch("urllib.request.urlopen", side_effect=AssertionError("오프라인 검사 중 네트워크 요청")):
+            result = probe()
+        self.assertEqual(result["voices"], 10)
+        self.assertTrue(result["cpu_inference"])
 
 
 if __name__ == "__main__":

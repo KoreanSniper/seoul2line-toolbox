@@ -341,6 +341,7 @@ class UITests(unittest.TestCase):
 
     def tearDown(self):
         self.tool.destroy()
+        self.tool.executor.shutdown(wait=True)
         self.root.destroy()
         self.tool.audio.worker.join(2)
         gc.collect()
@@ -510,7 +511,9 @@ class UITests(unittest.TestCase):
         identity = self.tool.items[0]["id"]
         with patch("app.tools.gaming_soundboard.filedialog.askopenfilename", return_value=str(source)):
             self.tool.click(identity)
-        self.pump(.3)
+        deadline = time.monotonic() + 5
+        while self.tool.busy and time.monotonic() < deadline:
+            self.pump(.02)
         self.assertFalse(self.tool.busy)
         source.unlink()
         self.assertTrue(self.store.resolve(self.store.items()[0]["path"]).exists())

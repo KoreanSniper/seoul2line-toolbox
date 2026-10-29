@@ -77,6 +77,9 @@ def run(report_path: str) -> int:
         checkpoint("Voice FX 네이티브 효과 검사")
         from app.services.voice_fx_probe import probe
         report["voice_fx"] = probe()
+        checkpoint("자연음성 CPU 엔진 검사")
+        from app.services.natural_tts_probe import probe as natural_probe
+        report["natural_tts"] = natural_probe()
         checkpoint("TTS Voice FX 화면 검사")
         from app.tools.file_tts import TTSTool
         tts = next(tool for tool in app.registry.tools_for('파일') if tool.id == 'files.tts')

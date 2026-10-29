@@ -31,6 +31,9 @@ try {
         '--add-data', 'app/games/starsystem/renderer/shaders;app/games/starsystem/renderer/shaders', '--collect-submodules', 'app',
         '--collect-data', 'soundcard', '--collect-all', '_soundfile_data',
         '--collect-all', 'pedalboard', '--hidden-import', 'pedalboard_native',
+        '--collect-binaries', 'onnxruntime', '--collect-data', 'onnxruntime', '--copy-metadata', 'onnxruntime',
+        '--collect-data', 'supertonic', '--copy-metadata', 'supertonic', '--copy-metadata', 'huggingface-hub',
+        '--hidden-import', 'supertonic.pipeline', '--hidden-import', 'onnxruntime.capi.onnxruntime_pybind11_state',
         '--hidden-import', 'uuid', '--hidden-import', 'keyword', 'main.py')
     if (-not $Incremental) { $bundleArguments += '--clean' }
     Invoke-Python $bundleArguments
