@@ -6,3 +6,4 @@ matplotlib>=3.9
 numpy>=2.0
 SoundCard==0.4.5
 soundfile==0.13.1
+pedalboard==0.9.22
