@@ -3,6 +3,9 @@ import json
 from pathlib import Path
 import tempfile
 import threading
+import os
+import sys
+import time
 import unittest
 from unittest.mock import patch
 
@@ -134,6 +137,45 @@ class VoiceFXTests(unittest.TestCase):
                 result = process(source, rate, fx)
                 self.assertEqual(result.shape[1], 2)
                 self.assertTrue(np.isfinite(result).all())
+
+    def test_long_audio_limits_missing_dependency_and_mid_effect_cancel(self):
+        samples = tone(22050, 20, 2)
+        result = process(samples, 22050, configured(robot={}, compressor={}, eq={"mid": -3}))
+        self.assertEqual(result.shape, samples.shape)
+        with patch("app.services.voice_fx.MAX_SAMPLES", 1000):
+            with self.assertRaises(ValueError):
+                process(tone(8000, .05), 8000, configured(echo={}))
+            with self.assertRaises(ValueError):
+                process(tone(8000, .1), 8000, configured(speed={"factor": .5}))
+        with patch.dict(sys.modules, {"pedalboard": None}):
+            with self.assertRaisesRegex(RuntimeError, "라이브러리"):
+                process(tone(), 22050, configured(robot={}))
+        event = threading.Event()
+        with self.assertRaisesRegex(RuntimeError, "취소"):
+            process(tone(), 22050, configured(robot={}), event, lambda _: event.set())
+
+    def test_invalid_audio_cache_metadata_and_old_cache_cleanup(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "voice.wav"
+            source.write_bytes(b"not audio")
+            renderer = FXRenderer(root / "cache")
+            with self.assertRaises((ValueError, sf.LibsndfileError)):
+                renderer.render(source, configured(robot={}))
+            sf.write(source, tone(), 22050)
+            cached = renderer.render(source, configured(robot={}))
+            cached.with_suffix(".json").write_text("[]", encoding="utf-8")
+            self.assertEqual(renderer.render(source, configured(robot={})), cached)
+            old = time.time() - 31 * 86400
+            os.utime(cached, (old, old))
+            unrelated = renderer.folder / "user.wav"
+            unrelated.write_bytes(b"keep")
+            renderer.prune()
+            self.assertFalse(cached.exists())
+            self.assertEqual(unrelated.read_bytes(), b"keep")
+            sf.write(source, np.array([[float("nan")]], dtype=np.float32), 22050, subtype="FLOAT")
+            with self.assertRaises(ValueError):
+                renderer.render(source, configured(robot={}))
 
 
 class PresetTests(unittest.TestCase):

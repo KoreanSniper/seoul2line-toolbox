@@ -183,22 +183,12 @@ class WindowsTTS:
         return title
 
     def _robot_effect(self, source, target):
-        """90Hz 링 변조로 길이·출력 형식·볼륨 상한을 유지하는 금속성 효과."""
-        import numpy as np
+        # Compatibility for callers of the original robot option; same DSP engine.
         import soundfile as sf
-
-        with sf.SoundFile(source) as original, sf.SoundFile(
-                target, mode="w", samplerate=original.samplerate,
-                channels=original.channels, subtype="PCM_16", format="WAV") as result:
-            offset = 0
-            for samples in original.blocks(blocksize=16384, dtype="float32", always_2d=True):
-                if self.cancel.is_set():
-                    raise RuntimeError("음성 변형을 취소했습니다.")
-                # 블록 경계에서도 위상을 이어가며 무음은 그대로 유지한다.
-                phase = (np.arange(len(samples)) + offset) * (2 * np.pi * 90 / original.samplerate)
-                carrier = .25 + .75 * np.sin(phase)
-                result.write(np.clip(samples * carrier[:, None], -1, 1))
-                offset += len(samples)
+        from app.services.voice_fx import configured, process
+        samples, rate = sf.read(source, dtype="float32", always_2d=True)
+        result = process(samples, rate, configured(robot={}), self.cancel, self.progress)
+        sf.write(target, result, rate, subtype="PCM_16")
 
     def generate(self, text, target, voice="", rate=0, volume=100, effect="none", preview_seconds=None):
         if not text.strip() or len(text) > 10000:

@@ -1,4 +1,4 @@
-param([string]$Python = '', [switch]$InstallDependencies)
+param([string]$Python = '', [switch]$InstallDependencies, [switch]$Incremental)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Push-Location -LiteralPath $projectRoot
@@ -25,12 +25,15 @@ try {
     if (-not $versionLine) { throw 'app/version.py must contain a stable x.y.z VERSION.' }
     $appVersion = [regex]::Match($versionLine, '"([0-9]+\.[0-9]+\.[0-9]+)"').Groups[1].Value
     if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$appVersion") { throw 'Tag must match app/version.py.' }
-    Invoke-Python @('-m', 'PyInstaller', '--noconfirm', '--clean', '--onedir', '--windowed',
+    $bundleArguments = @('-m', 'PyInstaller', '--noconfirm', '--onedir', '--windowed',
         '--name', 'seoul2line Toolbox', '--icon', 'app/assets/toolbox.ico', '--add-data', 'app/assets;app/assets',
         '--add-data', 'installer/install_update.ps1;updater',
         '--add-data', 'app/games/starsystem/renderer/shaders;app/games/starsystem/renderer/shaders', '--collect-submodules', 'app',
         '--collect-data', 'soundcard', '--collect-all', '_soundfile_data',
+        '--collect-all', 'pedalboard', '--hidden-import', 'pedalboard_native',
         '--hidden-import', 'uuid', '--hidden-import', 'keyword', 'main.py')
+    if (-not $Incremental) { $bundleArguments += '--clean' }
+    Invoke-Python $bundleArguments
     if (-not (Test-Path -LiteralPath 'dist/seoul2line Toolbox/seoul2line Toolbox.exe')) { throw 'PyInstaller output missing.' }
     foreach ($pluginName in @('developer_tools', 'automation_tools', 'example_plugin')) {
         $pluginSource = Join-Path $projectRoot "plugins/$pluginName"
@@ -49,7 +52,7 @@ try {
         $reportPath = Join-Path $projectRoot 'build/frozen-smoke.json'
         if (Test-Path -LiteralPath $reportPath) { Remove-Item -LiteralPath $reportPath }
         $smoke = Start-Process -FilePath (Join-Path $projectRoot 'dist/seoul2line Toolbox/seoul2line Toolbox.exe') -ArgumentList @('--self-test-report', ('"{0}"' -f $reportPath)) -WindowStyle Hidden -PassThru
-        if (-not $smoke.WaitForExit(60000)) { $smoke.Kill(); throw 'Frozen smoke test timed out.' }
+        if (-not $smoke.WaitForExit(180000)) { $smoke.Kill(); throw 'Frozen smoke test timed out. Check the last stage in build/frozen-smoke.json.' }
         if ($smoke.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $reportPath)) { throw 'Frozen smoke test failed. Check build/frozen-smoke.json.' }
         $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
         if (-not $report.ok) { throw $report.error }

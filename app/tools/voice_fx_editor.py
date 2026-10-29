@@ -16,6 +16,7 @@ class VoiceFXEditor(tk.Frame):
         self.settings = default_settings()
         self.selected_id = None
         self.save_timer = None
+        self.closed = False
         self.variables = []
         self.expanded = {"pitch", "speed", "formant"}
         self.columnconfigure(0, weight=1)
@@ -152,6 +153,8 @@ class VoiceFXEditor(tk.Frame):
         self.changed()
 
     def parameter(self, node, name, variable):
+        if self.closed:
+            return
         value = variable.get()
         if value != node["params"][name]:
             node["params"][name] = value
@@ -166,12 +169,16 @@ class VoiceFXEditor(tk.Frame):
             self.render_chain()
 
     def changed(self):
+        if self.closed:
+            return
         self.preset.set("사용자 정의 · 수정됨")
         if self.save_timer is not None:
             self.after_cancel(self.save_timer)
         self.save_timer = self.after(500, self.persist)
 
     def persist(self):
+        if self.save_timer is not None:
+            self.after_cancel(self.save_timer)
         self.save_timer = None
         try:
             self.store.save_current(self.snapshot())
@@ -253,6 +260,9 @@ class VoiceFXEditor(tk.Frame):
             self.perform(lambda: self.store.export(path, record))
 
     def destroy(self):
+        if self.closed:
+            return
+        self.closed = True
         if self.save_timer is not None:
             self.after_cancel(self.save_timer)
             self.save_timer = None

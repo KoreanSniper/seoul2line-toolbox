@@ -1,4 +1,5 @@
 import gc
+import queue
 from pathlib import Path
 import tempfile
 import threading
@@ -20,6 +21,7 @@ from app.services.voice_fx_soundboard import copy_with_fx
 from app.services.voice_fx_store import PresetStore
 from app.tools.file_tts import TTSTool
 from app.tools.voice_fx_editor import VoiceFXEditor
+from app.tools.gaming_soundboard import SoundboardTool
 
 
 def write_audio(path):
@@ -98,6 +100,20 @@ class FXIntegrationTests(unittest.TestCase):
         self.assertEqual(sf.info(target).frames, 22050)
         engine.close()
 
+    def test_tts_full_chain_registration_and_failure_preserves_existing(self):
+        engine = WindowsTTS()
+        store = SoundboardStore(self.root)
+        with patch.object(engine, "_run", side_effect=lambda p: write_audio(p["path"])) as synth, patch("app.services.soundboard_store.SoundboardStore", return_value=store):
+            engine.add_to_soundboard("변조 등록", "목소리", effect=configured(speed={"factor": 2}, robot={}))
+            item = store.items()[0]
+            self.assertAlmostEqual(sf.info(store.resolve(item["path"])).duration, .5, delta=.01)
+            with patch.object(store, "register_file", side_effect=OSError("실패")):
+                with self.assertRaises(OSError):
+                    engine.add_to_soundboard("변조 등록", "실패", effect=configured(reverse={}))
+            self.assertEqual(synth.call_count, 1)
+            self.assertEqual(store.items(), [item])
+        engine.close()
+
     def test_batch_copies_preserve_originals_and_failure_rolls_back_batch(self):
         store = SoundboardStore(self.root)
         source = self.root / "source.wav"
@@ -152,12 +168,67 @@ class FXIntegrationTests(unittest.TestCase):
                 self.assertGreater(editor.canvas.bbox("all")[3], editor.canvas.winfo_height())
                 settings = editor.snapshot()
                 editor.persist()
+                editor.changed()
+                pending_save = editor.save_timer
                 editor.destroy()
+                self.assertNotIn(pending_save, root.tk.call("after", "info"))
+                for timer in root.tk.call("after", "info"):
+                    self.assertNotIn("persist", str(root.tk.call("after", "info", timer)))
                 self.assertEqual(PresetStore(self.root / theme).current(), settings)
                 del editor
                 gc.collect()
         finally:
             root.destroy()
+
+    def test_soundboard_dialog_batch_copy_and_close_cancels(self):
+        class Audio:
+            def __init__(self):
+                self.current, self.generation, self.closed = None, 0, False
+                self.events = queue.Queue()
+                self.driver = SimpleNamespace(devices=lambda: [])
+            def volumes(self, *args):
+                pass
+            def stop(self):
+                self.current = None
+            def close(self):
+                self.closed = True
+        root = tk.Tk()
+        store = SoundboardStore(self.root)
+        source = self.root / "source.wav"
+        write_audio(source)
+        identity = store.add()
+        store.register_file(identity, source, AudioDriver().validate)
+        tool = SoundboardTool(root, SimpleNamespace(dark_mode=ThemeMode("green")), store, Audio())
+        tool.pack(fill="both", expand=True)
+        try:
+            tool.toggle_edit()
+            root.update()
+            self.assertLessEqual(tool.edit_actions.winfo_reqwidth(), 480)
+            tool.open_voice_fx()
+            dialog = tool.fx_dialog
+            dialog.fx.load(configured(robot={}))
+            dialog.selection.selection_set(0)
+            tool.apply_voice_fx([identity], dialog.fx.snapshot())
+            pump(root, lambda: not tool.busy)
+            self.assertEqual(len(store.items()), 2)
+            self.assertIn("완료", dialog.status.get())
+            entered = threading.Event()
+            def waiting(store, identities, settings, cancel, *args):
+                entered.set()
+                cancel.wait(3)
+                raise RuntimeError("변조 복사 취소")
+            with patch("app.services.voice_fx_soundboard.copy_with_fx", side_effect=waiting):
+                tool.apply_voice_fx([identity], dialog.fx.snapshot())
+                self.assertTrue(entered.wait(3))
+                dialog.destroy()
+                pump(root, lambda: not tool.busy)
+            self.assertEqual(len(store.items()), 2)
+        finally:
+            tool.destroy()
+            tool.executor.shutdown(wait=True)
+            root.destroy()
+            del dialog, tool
+            gc.collect()
 
     def test_tts_ui_remains_responsive_cancel_duplicate_and_text_preserved(self):
         root = tk.Tk()

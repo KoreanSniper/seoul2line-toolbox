@@ -8,7 +8,13 @@ import traceback
 def run(report_path: str) -> int:
     report = {"ok": False}
     app = None
+    path = Path(report_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    def checkpoint(stage):
+        report["stage"] = stage
+        path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     try:
+        checkpoint("앱 모듈 로딩")
         from app.main_window import Seoul2LineToolbox
         from app.config import APP_DIR
         from app.version import VERSION
@@ -18,6 +24,7 @@ def run(report_path: str) -> int:
         from app.tools.gaming_soundboard import SoundboardTool
         from app.games.sandbox.view import SandboxView
         app = Seoul2LineToolbox()
+        checkpoint("앱 초기화 완료")
         app.withdraw()
         app.updater.close()
         app.show_section("설정")
@@ -53,6 +60,7 @@ def run(report_path: str) -> int:
         app.show_section('설정')
         app.update_idletasks()
         assert not aim_view.winfo_exists() and aim_view.raw is None and aim_view.job is None
+        checkpoint("기존 도구 검사 완료")
         soundboard = next(tool for tool in app.registry.tools_for('게임') if tool.id == 'gaming.soundboard')
         app.show_tool(soundboard)
         app.update_idletasks()
@@ -66,6 +74,20 @@ def run(report_path: str) -> int:
         app.show_section('설정')
         app.update_idletasks()
         assert not soundboard_view.winfo_exists() and soundboard_view.audio.closed
+        checkpoint("Voice FX 네이티브 효과 검사")
+        from app.services.voice_fx_probe import probe
+        report["voice_fx"] = probe()
+        checkpoint("TTS Voice FX 화면 검사")
+        from app.tools.file_tts import TTSTool
+        tts = next(tool for tool in app.registry.tools_for('파일') if tool.id == 'files.tts')
+        app.show_tool(tts)
+        app.update_idletasks()
+        tts_view = next(widget for widget in descendants(app.workspace) if isinstance(widget, TTSTool))
+        assert len(tts_view.fx.snapshot()['chain']) == 15
+        app.show_section('설정')
+        app.update_idletasks()
+        assert not tts_view.winfo_exists() and tts_view.closed
+        checkpoint("TTS 검사 완료")
         sandbox = next(tool for tool in app.registry.tools_for('미니게임') if tool.id == 'minigame.sandbox')
         app.show_tool(sandbox)
         app.update_idletasks()
@@ -85,7 +107,8 @@ def run(report_path: str) -> int:
                 'automation.editor', 'automation.history', 'automation.manager'}
             assert all(tool.plugin_id == 'automation_tools' for tool in automation_tools)
         report.update(ok=True, version=VERSION, tool_count=len(tools), data_directory=str(APP_DIR),
-                      plugins=[plugin.id for plugin in app.plugin_manager.plugins], checked_tools=["settings.preferences", "home.system_monitor", "minigame.trsim", "gaming.aim_trainer", "gaming.soundboard", "minigame.sandbox"])
+                      plugins=[plugin.id for plugin in app.plugin_manager.plugins], checked_tools=["settings.preferences", "home.system_monitor", "minigame.trsim", "gaming.aim_trainer", "gaming.soundboard", "files.tts", "minigame.sandbox"])
+        checkpoint("검사 완료")
     except Exception:
         report["error"] = traceback.format_exc()
     finally:

@@ -104,9 +104,12 @@ class SoundboardTool(tk.Frame):
             slider.grid(row=i, column=2, padx=(8, 0))
             self.device_scales.append(slider)
         actions = self.edit_actions = tk.Frame(self.settings_panel, bg=self.cget("bg"))
-        self.button(actions, "장치 새로고침", self.refresh_devices).pack(side="left")
-        self.button(actions, "사운드 추가", self.add).pack(side="left", padx=8)
-        self.button(actions, "목소리 변조 복사", self.open_voice_fx).pack(side="left")
+        for title, command, width in (("장치 새로고침", self.refresh_devices, 130),
+                                      ("사운드 추가", self.add, 110),
+                                      ("목소리 변조 복사", self.open_voice_fx, 150)):
+            button = self.button(actions, title, command)
+            button.configure(width=width)
+            button.pack(side="left", padx=(0, 6))
         self.label(self, textvariable=self.status, wraplength=600, justify="left").grid(row=2, column=0, sticky="ew", padx=18, pady=8)
 
         wrap = tk.Frame(self, bg=self.cget("bg"))
