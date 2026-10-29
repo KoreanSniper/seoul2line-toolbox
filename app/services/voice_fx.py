@@ -1,5 +1,4 @@
 """Offline Voice FX schema, ordered DSP and bounded, verified render cache."""
-from copy import deepcopy
 import hashlib
 import json
 import math
@@ -44,7 +43,7 @@ def default_settings():
 
 def validate_settings(value):
     """Strict validation; malformed imported data never silently becomes a valid effect."""
-    if not isinstance(value, dict) or value.get("version") != VERSION or type(value.get("enabled")) is not bool:
+    if not isinstance(value, dict) or type(value.get("version")) is not int or value.get("version") != VERSION or type(value.get("enabled")) is not bool:
         raise ValueError("지원하지 않거나 손상된 Voice FX 설정입니다.")
     chain = value.get("chain")
     if not isinstance(chain, list) or len(chain) > len(EFFECTS):
@@ -160,6 +159,8 @@ def _plugins(samples, rate, plugins, cancel, tail=0):
     import numpy as np
     from pedalboard import Pedalboard
     board = Pedalboard(plugins)
+    if (len(samples) + int(rate * tail)) * samples.shape[1] > MAX_SAMPLES or len(samples) + int(rate * tail) > rate * MAX_SECONDS:
+        raise ValueError("잔향을 포함한 결과가 처리 한도를 넘습니다. 텍스트를 나누세요.")
     if tail:
         samples = np.pad(samples, ((0, int(rate * tail)), (0, 0)))
     blocks = []
@@ -176,6 +177,11 @@ def _plugins(samples, rate, plugins, cancel, tail=0):
 
 def process(samples, rate, settings, cancel=None, progress=None):
     import numpy as np
+    samples = np.asarray(samples, dtype=np.float32)
+    if (samples.ndim != 2 or samples.shape[1] not in (1, 2) or not len(samples)
+            or not isinstance(rate, (int, float)) or not math.isfinite(rate) or not 8000 <= rate <= 192000
+            or samples.size > MAX_SAMPLES or len(samples) > rate * MAX_SECONDS or not np.isfinite(samples).all()):
+        raise ValueError("처리할 음성의 길이·채널·샘플레이트·신호가 유효하지 않습니다.")
     settings = validate_settings(settings)
     check_cancel(cancel)
     if not settings["enabled"] or not any(n["enabled"] for n in settings["chain"]):
@@ -197,6 +203,8 @@ def process(samples, rate, settings, cancel=None, progress=None):
         if key in ("pitch", "speed"):
             value = p["semitones"] if key == "pitch" else p["factor"]
             if value != (0 if key == "pitch" else 1):
+                if key == "speed" and (result.size / value > MAX_SAMPLES or len(result) / value > rate * MAX_SECONDS):
+                    raise ValueError("배속 적용 결과가 처리 한도를 넘습니다. 텍스트를 나누세요.")
                 result = pb.time_stretch(np.ascontiguousarray(result.T), rate,
                     stretch_factor=value if key == "speed" else 1,
                     pitch_shift_in_semitones=value if key == "pitch" else 0,
@@ -288,7 +296,11 @@ class FXRenderer:
         target = self.folder / (identity + ".wav")
         metadata = target.with_suffix(".json")
         try:
+            if metadata.stat().st_size > 4096:
+                raise ValueError("손상된 캐시 메타데이터")
             record = json.loads(metadata.read_text(encoding="utf-8"))
+            if not isinstance(record, dict):
+                raise ValueError("손상된 캐시 메타데이터")
             if record["sha256"] == _hash(target, cancel):
                 cached = sf.info(str(target))
                 if cached.frames == record["frames"] and cached.samplerate == info.samplerate and cached.channels == info.channels:
@@ -313,6 +325,8 @@ class FXRenderer:
                 sf.write(temporary, result, rate, subtype="PCM_16")
             check_cancel(cancel)
             output = sf.info(temporary)
+            if Path(temporary).stat().st_size > self.max_bytes:
+                raise ValueError("변조 결과가 캐시 용량 제한을 넘습니다. 음성을 나누세요.")
             record = {"sha256": _hash(temporary, cancel), "frames": output.frames}
             os.replace(temporary, target)
             from app.services.voice_fx_store import atomic_json

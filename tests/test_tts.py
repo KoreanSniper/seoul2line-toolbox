@@ -13,6 +13,7 @@ import numpy as np
 import soundfile as sf
 from app.palette import ThemeMode
 from app.services.tts import WindowsTTS
+from app.services.voice_fx import builtin_presets, default_settings
 from app.services.soundboard_store import SoundboardStore
 from app.tools.file_tts import TTSTool, register
 from app.tool_registry import ToolRegistry
@@ -214,6 +215,12 @@ class FakeEngine:
 
 class TTSUITests(unittest.TestCase):
     def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        for module in ("app.services.voice_fx", "app.services.voice_fx_store", "app.services.voice_fx_log"):
+            patcher = patch(module + ".data_directory", return_value=Path(self.temporary.name))
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.devices = [{"id": "cable", "name": "케이블", "channels": 2}]
         self.device_patch = patch("app.tools.file_tts.AudioDriver.devices", side_effect=lambda: list(self.devices))
         self.device_patch.start()
@@ -280,17 +287,18 @@ class TTSUITests(unittest.TestCase):
             self.assertEqual(tool.output_device.current(), 0)
             tool.rate.set(2)
             tool.volume.set(30)
-            tool.effect.current(1)
+            robot = builtin_presets()[3]["settings"]
+            tool.fx.load(robot)
             with patch("app.tools.file_tts.filedialog.asksaveasfilename", side_effect=AssertionError("일회용 출력에 저장 창이 열림")):
                 tool.generate(play_once=True)
                 until(lambda: not tool.busy)
-            self.assertEqual(engine.calls[-1], ("played", ("한글 첫 줄\n두 번째 줄", self.devices[0], "한국어", 2, 30, "robot")))
+            self.assertEqual(engine.calls[-1], ("played", ("한글 첫 줄\n두 번째 줄", self.devices[0], "한국어", 2, 30, robot)))
             self.assertIn("폐기 완료", tool.status.get())
             tool.generate(True)
             until(lambda: not tool.busy)
             self.assertEqual(engine.calls[-1][0], "added")
             self.assertEqual(engine.calls[-1][1][1], "한글 첫 줄")
-            self.assertEqual(engine.calls[-1][1][-1], "robot")
+            self.assertEqual(engine.calls[-1][1][-1], robot)
             self.devices = [{"id": "other", "name": "동일 이름", "channels": 2}]
             tool.refresh_devices()
             until(lambda: not tool.discovering)
@@ -320,7 +328,7 @@ class TTSUITests(unittest.TestCase):
                         time.sleep(.005)
                 pump()
                 self.assertEqual(tool.voice.current(), 1)
-                self.assertEqual(tool.effect.get(), "원본")
+                self.assertFalse(tool.fx.snapshot()["enabled"])
                 tool.generate()
                 self.assertIn("입력", tool.status.get())
                 tool.text.insert("1.0", "안녕하세요.")
@@ -330,7 +338,7 @@ class TTSUITests(unittest.TestCase):
                 with patch("app.tools.file_tts.filedialog.asksaveasfilename", return_value="한글.wav"):
                     tool.generate()
                 pump()
-                self.assertEqual(engine.calls[0], ("안녕하세요.", "한글.wav", "한국어", 0, 100, "none"))
+                self.assertEqual(engine.calls[0], ("안녕하세요.", "한글.wav", "한국어", 0, 100, default_settings()))
                 self.assertIn("저장 완료", tool.status.get())
                 timer = tool.timer
                 tool.destroy()

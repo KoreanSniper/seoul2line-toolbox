@@ -106,6 +106,7 @@ class SoundboardTool(tk.Frame):
         actions = self.edit_actions = tk.Frame(self.settings_panel, bg=self.cget("bg"))
         self.button(actions, "장치 새로고침", self.refresh_devices).pack(side="left")
         self.button(actions, "사운드 추가", self.add).pack(side="left", padx=8)
+        self.button(actions, "목소리 변조 복사", self.open_voice_fx).pack(side="left")
         self.label(self, textvariable=self.status, wraplength=600, justify="left").grid(row=2, column=0, sticky="ew", padx=18, pady=8)
 
         wrap = tk.Frame(self, bg=self.cget("bg"))
@@ -335,8 +336,37 @@ class SoundboardTool(tk.Frame):
             try:
                 results.put((kind, command(), None))
             except Exception as exc:
+                from app.services.voice_fx_log import log_failure
+                log_failure()
                 results.put((kind, None, str(exc)))
         self.executor.submit(run)
+
+    def open_voice_fx(self):
+        if self.closed or self.busy or not self.store:
+            return
+        from app.tools.voice_fx_soundboard import SoundboardFXDialog
+        current = getattr(self, "fx_dialog", None)
+        if current and current.winfo_exists():
+            current.lift()
+            return
+        self.stop()
+        self.fx_cancel = threading.Event()
+        self.fx_dialog = SoundboardFXDialog(self, self.colors, self.items, self.apply_voice_fx, self.fx_cancel.set)
+
+    def apply_voice_fx(self, identities, settings):
+        if self.closed or self.busy:
+            return
+        if not identities:
+            self.fx_dialog.status.set("변조할 사운드를 하나 이상 선택하세요.")
+            return
+        from app.services.voice_fx_soundboard import copy_with_fx
+        self.fx_cancel.clear()
+        self.busy = True
+        self.status.set("사운드보드 변조 복사 중… 원본은 유지됩니다.")
+        self.fx_dialog.status.set("변조 복사 중… 닫으면 작업을 취소합니다.")
+        store, cancel, results = self.store, self.fx_cancel, self.results
+        self.submit("fx_copied", lambda: copy_with_fx(store, identities, settings, cancel,
+                                                    lambda message: results.put(("fx_progress", message, None))))
 
     def refresh_devices(self):
         if not getattr(self, "discovering", False):
@@ -415,6 +445,16 @@ class SoundboardTool(tk.Frame):
                 else:
                     self.devices = result
                     self.update_selectors()
+            elif kind == "fx_progress":
+                self.status.set(result)
+                if getattr(self, "fx_dialog", None) and self.fx_dialog.winfo_exists():
+                    self.fx_dialog.status.set(result)
+            elif kind == "fx_copied":
+                self.busy = False
+                self.status.set("변조 복사 실패: " + error if error else f"변조 복사 완료: {len(result)}개 · 기존 원본 유지")
+                self.reload()
+                if getattr(self, "fx_dialog", None) and self.fx_dialog.winfo_exists():
+                    self.fx_dialog.status.set(self.status.get())
         while not self.audio.events.empty():
             generation, kind, message = self.audio.events.get_nowait()
             if generation == self.audio.generation and kind == "error":
@@ -428,6 +468,10 @@ class SoundboardTool(tk.Frame):
         self.closed = True
         self.stop()
         self.files_cancel.set()
+        if hasattr(self, "fx_cancel"):
+            self.fx_cancel.set()
+        if getattr(self, "fx_dialog", None) and self.fx_dialog.winfo_exists():
+            self.fx_dialog.destroy()
         self.save_titles()
         self.audio.close()
         self.executor.shutdown(wait=False, cancel_futures=True)

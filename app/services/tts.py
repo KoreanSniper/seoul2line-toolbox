@@ -41,9 +41,68 @@ try {
 class WindowsTTS:
     def __init__(self):
         self.cancel = threading.Event()
+        self.progress = None
+        self._session = None
+        self._source_key = None
+        self._source_file = None
+        self._session_lock = threading.Lock()
+        self._renderer = None
 
     def close(self):
         self.cancel.set()
+        self.cleanup()
+
+    def cleanup(self):
+        # The active worker owns its temporary source until it observes cancellation.
+        if self._session_lock.acquire(blocking=False):
+            try:
+                if self._session is not None:
+                    self._session.cleanup()
+                    self._session = None
+                self._source_key = self._source_file = None
+            finally:
+                self._session_lock.release()
+
+    def reset_cancel(self):
+        self.cancel.clear()
+
+    def _cached_generate(self, text, target, voice, rate, volume, settings, preview_seconds):
+        from app.services.voice_fx import FXRenderer, atomic_copy, check_cancel, validate_settings
+        settings = validate_settings(settings)
+        try:
+            with self._session_lock:
+                check_cancel(self.cancel)
+                key = (text, voice, rate, volume)
+                if self._session is None:
+                    self._session = tempfile.TemporaryDirectory(prefix="toolbox-tts-source-")
+                source = Path(self._session.name) / "original.wav"
+                if self._source_key != key or not source.exists():
+                    if self.progress:
+                        self.progress("원본 TTS 생성 중…")
+                    # Use the established atomic Windows synthesis path.
+                    self.generate(text, source, voice, rate, volume, "none")
+                    self._source_key, self._source_file = key, source
+                elif self.progress:
+                    self.progress("보존한 원본 TTS 재사용")
+                self._renderer = self._renderer or FXRenderer()
+                rendered = self._renderer.render(source, settings, self.cancel, self.progress, preview_seconds)
+                atomic_copy(rendered, target, self.cancel)
+                return str(target)
+        finally:
+            if self.cancel.is_set():
+                self.cleanup()
+
+    def render_cached(self, settings):
+        from app.services.voice_fx import check_cancel
+        try:
+            with self._session_lock:
+                check_cancel(self.cancel)
+                if not self._source_file or not self._source_file.exists() or self._renderer is None:
+                    raise ValueError("먼저 원본 미리듣기·저장·출력으로 TTS 음성을 생성하세요.")
+                return str(self._renderer.render(self._source_file, settings, self.cancel, self.progress))
+        finally:
+            if self.cancel.is_set():
+                self.cleanup()
 
     def _run(self, payload):
         if sys.platform != "win32":
@@ -80,7 +139,7 @@ class WindowsTTS:
         result = json.loads(self._run({"action": "voices"}) or "[]")
         return result if isinstance(result, list) else [result]
 
-    def play_once(self, text, output, voice="", rate=0, volume=100, effect="none"):
+    def play_once(self, text, output, voice="", rate=0, volume=100, effect="none", preview_seconds=None):
         from app.services.soundboard_audio import AudioDriver
 
         if not output.get("id"):
@@ -88,7 +147,7 @@ class WindowsTTS:
         # 재생 스트림이 닫힌 뒤 정상 종료·오류·화면 종료 모두 임시 WAV를 제거한다.
         with tempfile.TemporaryDirectory(prefix="toolbox-tts-once-") as directory:
             source = Path(directory) / "voice.wav"
-            self.generate(text, source, voice, rate, volume, effect)
+            self.generate(text, source, voice, rate, volume, effect, preview_seconds)
             if self.cancel.is_set():
                 raise RuntimeError("일회용 음성 출력을 취소했습니다.")
             ready, start = threading.Event(), threading.Event()
@@ -141,16 +200,18 @@ class WindowsTTS:
                 result.write(np.clip(samples * carrier[:, None], -1, 1))
                 offset += len(samples)
 
-    def generate(self, text, target, voice="", rate=0, volume=100, effect="none"):
+    def generate(self, text, target, voice="", rate=0, volume=100, effect="none", preview_seconds=None):
         if not text.strip() or len(text) > 10000:
             raise ValueError("텍스트를 1~10,000자 입력하세요.")
         if not -10 <= rate <= 10 or not 0 <= volume <= 100:
             raise ValueError("속도는 -10~10, 볼륨은 0~100 범위로 입력하세요.")
-        if effect not in VOICE_EFFECTS:
-            raise ValueError("지원하지 않는 목소리 변형입니다.")
         target = Path(target).resolve()
         if target.suffix.lower() != ".wav":
             raise ValueError("저장 파일 확장자는 .wav여야 합니다.")
+        if isinstance(effect, dict):
+            return self._cached_generate(text, target, voice, rate, volume, effect, preview_seconds)
+        if effect not in VOICE_EFFECTS:
+            raise ValueError("지원하지 않는 목소리 변형입니다.")
         handle, temporary = tempfile.mkstemp(prefix=".tts-", suffix=".wav", dir=target.parent)
         os.close(handle)
         processed = temporary + ".effect.wav"
