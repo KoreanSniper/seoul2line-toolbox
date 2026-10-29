@@ -32,12 +32,23 @@ class TTSTool(tk.Frame):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(2, weight=1)
         tk.Label(self, text="TTS · Voice FX", font=("Malgun Gothic", 20, "bold"), bg=colors["panel"], fg=colors["text"]).grid(row=0, column=0, sticky="w", padx=18, pady=(12, 4))
-        tk.Label(self, text="오프라인 음성 생성 · 원본 보존 · 효과 체인과 프리셋",
+        tk.Label(self, text="로컬 자연음성 + Windows 음성 · 원본 보존 · Voice FX",
                  bg=colors["panel"], fg=colors["muted"]).grid(row=1, column=0, sticky="w", padx=18, pady=(0, 6))
         self.tabs = ttk.Notebook(self)
         self.tabs.grid(row=2, column=0, sticky="nsew", padx=18)
-        source_tab = tk.Frame(self.tabs, bg=colors["panel"])
-        self.tabs.add(source_tab, text="텍스트 · 음성 · 출력")
+        source_page = tk.Frame(self.tabs, bg=colors["panel"])
+        self.tabs.add(source_page, text="텍스트 · 음성 · 출력")
+        source_page.columnconfigure(0, weight=1)
+        source_page.rowconfigure(0, weight=1)
+        self.source_canvas = tk.Canvas(source_page, bg=colors["panel"], highlightthickness=0, height=260, width=300)
+        self.source_canvas.grid(row=0, column=0, sticky="nsew")
+        source_bar = styled_scrollbar(source_page, "vertical", self.source_canvas.yview, colors)
+        source_bar.grid(row=0, column=1, sticky="ns")
+        self.source_canvas.configure(yscrollcommand=source_bar.set)
+        source_tab = tk.Frame(self.source_canvas, bg=colors["panel"])
+        source_window = self.source_canvas.create_window(0, 0, window=source_tab, anchor="nw")
+        source_tab.bind("<Configure>", lambda _: self.source_canvas.configure(scrollregion=self.source_canvas.bbox("all")))
+        self.source_canvas.bind("<Configure>", lambda e: self.source_canvas.itemconfigure(source_window, width=max(1, e.width)))
         source_tab.columnconfigure(0, weight=1)
         source_tab.rowconfigure(0, weight=1)
         text_wrap = tk.Frame(source_tab, bg=colors["panel"])
@@ -55,7 +66,7 @@ class TTSTool(tk.Frame):
         controls = tk.Frame(source_tab, bg=colors["panel"])
         controls.grid(row=2, column=0, sticky="ew", pady=5)
         controls.columnconfigure(1, weight=1)
-        for row, title in enumerate(("Windows 음성", "TTS 읽기 속도", "볼륨 (%)")):
+        for row, title in enumerate(("음성", "TTS 읽기 속도", "볼륨 (%)")):
             tk.Label(controls, text=title, bg=colors["panel"], fg=colors["text"]).grid(row=row, column=0, sticky="w", padx=(0, 10))
         self.voice = ttk.Combobox(controls, state="disabled", width=18)
         self.voice.grid(row=0, column=1, sticky="ew")
@@ -72,6 +83,21 @@ class TTSTool(tk.Frame):
         refresh_button = RoundedButton(controls, "장치 새로고침", self.refresh_devices, colors, compact=True)
         refresh_button.configure(width=115)
         refresh_button.grid(row=4, column=2, padx=(8, 0))
+        self.model_info = tk.StringVar(value=self.engine.natural_model_status() if hasattr(self.engine, "natural_model_status") else "Windows 설치 음성 사용")
+        tk.Label(controls, textvariable=self.model_info, bg=colors["panel"], fg=colors["muted"], wraplength=350, justify="left").grid(row=5, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        install_voice = RoundedButton(controls, "자연음성 설치", self.install_natural, colors, compact=True)
+        install_voice.configure(width=115)
+        install_voice.grid(row=5, column=2, padx=(8, 0), pady=(6, 0))
+        def source_wheel(event):
+            self.source_canvas.yview_scroll(-int(event.delta / 120), "units")
+            return "break"
+        def bind_source_wheel(widget):
+            if not isinstance(widget, (tk.Text, tk.Scrollbar)):
+                widget.bind("<MouseWheel>", source_wheel)
+            for child in widget.winfo_children():
+                bind_source_wheel(child)
+        bind_source_wheel(source_tab)
+        self.source_canvas.bind("<MouseWheel>", source_wheel)
         self.fx = VoiceFXEditor(self.tabs, colors, self.status)
         self.tabs.add(self.fx, text="목소리 변조 · 프리셋")
         actions = tk.Frame(self, bg=colors["panel"])
@@ -127,8 +153,20 @@ class TTSTool(tk.Frame):
 
     def refresh_voices(self):
         if not self.closed and not self.busy:
+            if hasattr(self.engine, "reset_cancel"):
+                self.engine.reset_cancel()
             self.busy = True
             self.submit("voices", self.engine.voices)
+
+    def install_natural(self):
+        if self.closed or self.busy:
+            return
+        if not hasattr(self.engine, "install_natural"):
+            self.status.set("현재 음성 엔진은 자연음성 설치를 지원하지 않습니다.")
+            return
+        self.begin_work()
+        self.status.set("자연음성 모델 설치 중… 약 383MiB · 최초 설치에만 인터넷이 필요합니다.")
+        self.submit("model_installed", self.engine.install_natural)
 
     def cancel_work(self):
         if self.busy and hasattr(self.engine, "cancel"):
@@ -159,7 +197,7 @@ class TTSTool(tk.Frame):
             self.status.set("텍스트를 1~10,000자 입력하세요.")
             return
         if not self.voices:
-            self.status.set("사용 가능한 Windows 음성이 없습니다. Windows 설정에서 음성을 설치한 뒤 도구를 다시 여세요.")
+            self.status.set("사용 가능한 음성이 없습니다. 자연음성 모델을 설치하거나 Windows 음성을 추가하세요.")
             return
         if play_once or preview:
             selected = self.output_device.current()
@@ -177,7 +215,7 @@ class TTSTool(tk.Frame):
             if not target:
                 return
         if not 0 <= self.voice.current() < len(self.voices):
-            self.status.set("Windows 음성을 선택하세요.")
+            self.status.set("사용할 음성을 선택하세요.")
             return
         voice = self.voices[self.voice.current()]["name"]
         rate, volume = self.rate.get(), self.volume.get()
@@ -224,6 +262,8 @@ class TTSTool(tk.Frame):
                 continue
             self.busy = False
             self.progress_bar.stop()
+            if hasattr(self.engine, "natural_model_status"):
+                self.model_info.set(self.engine.natural_model_status())
             if error:
                 self.status.set("음성 처리 실패: " + error)
             elif hasattr(self.engine, "cancel") and self.engine.cancel.is_set():
@@ -231,11 +271,14 @@ class TTSTool(tk.Frame):
             elif kind == "voices":
                 old_voice = self.voices[self.voice.current()]["name"] if 0 <= self.voice.current() < len(self.voices) else None
                 self.voices = result
-                self.voice.configure(values=[f"{v['name']} ({v['culture']})" for v in result], state="readonly" if result else "disabled")
+                self.voice.configure(values=[f"{v.get('label', v['name'])} ({v['culture']})" for v in result], state="readonly" if result else "disabled")
                 if result:
                     self.voice.current(next((i for i, v in enumerate(result) if v["name"] == old_voice),
                                             next((i for i, v in enumerate(result) if v["culture"].startswith("ko")), 0)))
-                self.status.set("텍스트를 입력한 뒤 WAV 저장 또는 사운드보드에 추가를 누르세요." if result else "사용 가능한 Windows 음성이 없습니다. Windows 설정에서 음성을 설치하세요.")
+                self.status.set("자연음성은 모델 설치 후 사용합니다. 음성을 골라 저장·미리듣기·사운드보드 추가를 누르세요." if result else "사용 가능한 음성이 없습니다. 음성 모델을 설치하세요.")
+            elif kind == "model_installed":
+                self.status.set(result)
+                self.refresh_voices()
             elif kind == "added":
                 self.status.set("사운드보드에 추가 완료: " + result + " · 게임 → 사운드보드에서 재생하세요.")
             elif kind == "played":
@@ -260,7 +303,7 @@ class TTSTool(tk.Frame):
             self.after_cancel(self.timer)
             self.timer = None
         super().destroy()
-        self.status = self.rate = self.volume = self.title = self.count = self.short_preview = None
+        self.status = self.rate = self.volume = self.title = self.count = self.short_preview = self.model_info = None
 
 
 def register(registry):

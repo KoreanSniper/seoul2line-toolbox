@@ -47,9 +47,12 @@ class WindowsTTS:
         self._source_file = None
         self._session_lock = threading.Lock()
         self._renderer = None
+        self._natural = None
 
     def close(self):
         self.cancel.set()
+        if self._natural is not None:
+            self._natural.close()
         self.cleanup()
 
     def cleanup(self):
@@ -136,8 +139,25 @@ class WindowsTTS:
                     process.communicate()
 
     def voices(self):
-        result = json.loads(self._run({"action": "voices"}) or "[]")
-        return result if isinstance(result, list) else [result]
+        from app.services.natural_tts import NeuralModel, voice_records
+        natural = voice_records()
+        try:
+            result = json.loads(self._run({"action": "voices"}) or "[]")
+            installed = result if isinstance(result, list) else [result]
+        except Exception:
+            if self.cancel.is_set():
+                raise
+            installed = []
+        return natural + installed if NeuralModel().installed() else installed + natural
+
+    def natural_model_status(self):
+        from app.services.natural_tts import NeuralModel
+        model = NeuralModel()
+        return f"자연음성 10종 · {'설치됨 / 오프라인' if model.installed() else f'모델 설치 필요 ({model.size_mb}MiB)'}"
+
+    def install_natural(self):
+        from app.services.natural_tts import NeuralModel
+        return NeuralModel().install(self.cancel, self.progress)
 
     def play_once(self, text, output, voice="", rate=0, volume=100, effect="none", preview_seconds=None):
         from app.services.soundboard_audio import AudioDriver
@@ -206,8 +226,13 @@ class WindowsTTS:
         os.close(handle)
         processed = temporary + ".effect.wav"
         try:
-            self._run({"action": "generate", "text": text, "voice": voice,
-                       "rate": rate, "volume": volume, "path": temporary})
+            from app.services.natural_tts import PREFIX, NaturalTTS
+            if voice.startswith(PREFIX):
+                self._natural = self._natural or NaturalTTS()
+                self._natural.synthesize(text, temporary, voice, rate, volume, self.cancel, self.progress)
+            else:
+                self._run({"action": "generate", "text": text, "voice": voice,
+                           "rate": rate, "volume": volume, "path": temporary})
             if self.cancel.is_set():
                 raise RuntimeError("음성 생성을 취소했습니다.")
             with wave.open(temporary, "rb") as sound:
