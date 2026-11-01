@@ -1,0 +1,6 @@
+.buildozer/
+bin/
+local_data/
+*.apk
+*.aab
+!buildozer.spec
