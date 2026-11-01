@@ -2,7 +2,8 @@
 
 ## 진행 중 — Android TTS 및 GitHub Actions APK
 
-사용자가 GitHub Actions 빌드와 원격 브랜치 업로드를 선택했다.
+사용자가 GitHub Actions 빌드와 원격 브랜치 업로드를 선택했다. codex/mobile-android 브랜치를 업로드했다.
+Actions 41285536223에서 Linux 모델 34개·Kivy UI 3종은 통과했으며 빌드 의존성 충돌을 수정 중이다.
 Android 후속 01·02번은 실제 Actions 결과를 확인한 뒤 체크한다.
 
 - [x] 01. TTS 제어 모델·입력/속도 검증·발화 ID별 오래된 콜백 무시 구현·검증
@@ -10,7 +11,7 @@ Android 후속 01·02번은 실제 Actions 결과를 확인한 뒤 체크한다.
 - [x] 03. TTS 화면·엔진/음성/속도 선택·입력 보존·이동/일시정지/종료 처리 연결
 - [x] 04. TTS 서비스 queries·Buildozer Java 소스 등록·API 35 실제 Java 컴파일 확인
 - [x] 05. 제어 상태 9개·대역 기반 실제 Kivy TTS 화면·기존 상태/도구 25개 검사
-- [ ] 06. 원격 브랜치 업로드·Actions Linux 검사/빌드 실행 확인
+- [x] 06. 원격 브랜치 업로드·Actions Linux 검사/빌드 실행 확인
 - [ ] 07. Actions 실패 원인 수정·arm64 APK 생성 및 내부 파일 검증
 - [ ] 08. 빌드 APK 다운로드·해시/패키지/설치 가능성 확인
 - [ ] 09. Android 기기 설치·한국어 실제 출력·중지·음성 데이터 누락 확인

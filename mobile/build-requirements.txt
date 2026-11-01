@@ -1,4 +1,4 @@
 buildozer==1.6.0
 setuptools==80.9.0
-Cython==3.0.12
+Cython==0.29.37
 legacy-cgi==2.6.3

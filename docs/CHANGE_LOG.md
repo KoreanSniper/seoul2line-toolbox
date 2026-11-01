@@ -422,8 +422,14 @@
 - TODO의 실제 완료 세부 항목 5개를 기록했다. codex/mobile-android 브랜치로 작업을 이동했으며 기존 사용자 .gitignore·시스템 모니터 미커밋 변경은 제외한다. 이전 기록의 해시 치환만 함께 포함한다. 목표는 활성 상태로 유지한다.
 
 
-**ㄴ** 021-1. Linux Kivy 화면 검사 의존성 분리 (해시)
+**ㄴ** 021-1. Linux Kivy 화면 검사 의존성 분리 c2a22732dec2f5c9c1f8ded0a21d4a0efbe5d004
 
 - 첫 Actions 실행 41285371837에서 모델 34개는 통과했으나 Kivy 합성 터치 도우미가 필요로 하는 pytest 누락으로 UI 검사가 중단됐다. APK 작업은 의존 검사 실패로 실행되지 않았다.
 - test-requirements.txt에 Kivy·pytest·Pillow를 명시하고 CI 및 수동 검사 안내를 해당 파일로 통일했다. 검사 의존성은 Android 실행 requirements에 추가하지 않았다. 고정한 패키지 버전의 배포 존재와 YAML 구성을 확인했다.
 - 사용자 선택에 따라 새 원격 브랜치 업로드와 Actions 실행을 확인했으며 수정 커밋으로 재검증한다. Android 빌드 성공·기기 검사는 미완료다.
+
+
+**ㄴ** 021-2. Buildozer 빌드용 Cython 버전 충돌 수정 (해시)
+
+- 두 번째 Actions 실행 41285536223에서 Linux 모델 34개와 Kivy UI 3종 모두 통과했다. APK 작업에서는 Buildozer 1.6.0의 cython<3.0 조건과 기존 Cython 3.0.12 고정이 충돌했다.
+- 빌드 호스트 Cython을 0.29.37로 맞추고 Python 3.12 manylinux wheel의 배포를 확인했다. Android 레시피의 개별 호스트 빌드 의존성은 p4a가 관리한다. 원격 브랜치/Actions 실행 확인만 체크했으며 APK 생성·기기는 아직 미완료다.
