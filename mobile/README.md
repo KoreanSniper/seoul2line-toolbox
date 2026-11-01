@@ -39,6 +39,8 @@ py -m mobile.tests.smoke_ui
 
 두 번째 명령은 실제 Kivy 창을 실행한다. 임시 설정 경로로 홈·검색·설정·PC 메뉴와
 좁은 화면을 검사하고 `mobile/local_data/previews/`에 PNG를 남긴다.
+합성 터치로 짧은 탭·0.55초 길게 누르기·의도하지 않은 이동 방지·고정/해제 저장·
+손가락 이동 후 취소를 확인하고 Android 앱 일시정지 콜백의 저장 반환도 검사한다.
 이는 Windows 검사이며 Android 설치·키보드·시스템 인셋·실물 터치 검증을 대신하지 않는다.
 
 ## Android APK 빌드

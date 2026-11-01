@@ -6,6 +6,8 @@ from pathlib import Path
 import tempfile
 from kivy.clock import Clock
 from kivy.core.window import Window
+from kivy.tests.common import UnitTestTouch
+from kivy.uix.popup import Popup
 from mobile.main import ToolboxApp
 from mobile.model import State
 
@@ -52,8 +54,7 @@ class SmokeApp(ToolboxApp):
                 self.go('tts')
                 assert self.back(Window,27) is True
                 assert self.page == 'home'
-                self.pin_menu('menu1')
-                Clock.schedule_once(lambda _: self.stop(), .3)
+                Clock.schedule_once(self.short_tap, .2)
             except Exception as exc:
                 self.failed = exc
                 self.stop()
@@ -69,6 +70,70 @@ class SmokeApp(ToolboxApp):
             self.failed = exc
             self.stop()
 
+    def guarded(self, function):
+        try:
+            function()
+        except Exception as exc:
+            self.failed = exc
+            self.stop()
+
+    def short_tap(self, _):
+        def run():
+            self.short_target = self.state.tabs()['menu1']
+            touch = UnitTestTouch(*self.nav_buttons['menu1'].center)
+            touch.touch_down()
+            touch.touch_up()
+            Clock.schedule_once(self.begin_hold, .2)
+        self.guarded(run)
+
+    def begin_hold(self, _):
+        def run():
+            assert self.page == self.short_target, '짧은 탭으로 메뉴 이동 실패'
+            self.before_hold = self.page
+            self.touch = UnitTestTouch(*self.nav_buttons['menu2'].center)
+            self.touch.touch_down()
+            Clock.schedule_once(self.finish_hold, .7)
+        self.guarded(run)
+
+    def finish_hold(self, _):
+        def run():
+            self.touch.touch_up()
+            assert self.page == self.before_hold, '길게 누르기 후 잘못된 메뉴 이동'
+            popup = next(w for w in Window.children if isinstance(w, Popup))
+            self.root.export_to_png(str(self.output / 'hold-underlying.png'))
+            current = self.state.tabs()['menu2']
+            button = next(w for w in popup.content.children if getattr(w,'text','') == '현재 탭 고정하기')
+            button.dispatch('on_release')
+            assert State(self.state.path).pins['menu2'] == current
+            Clock.schedule_once(self.unpin_and_cancel, .3)
+        self.guarded(run)
+
+    def unpin_and_cancel(self, _):
+        def run():
+            self.pin_menu('menu2')
+            popup = next(w for w in Window.children if isinstance(w, Popup))
+            button = next(w for w in popup.content.children if getattr(w,'text','') == '고정 해제 · 자동 추천')
+            button.dispatch('on_release')
+            assert 'menu2' not in State(self.state.path).pins
+            Clock.schedule_once(self.cancel_moved_hold, .3)
+        self.guarded(run)
+
+    def cancel_moved_hold(self, _):
+        def run():
+            self.touch = UnitTestTouch(*self.nav_buttons['menu1'].center)
+            self.touch.touch_down()
+            self.touch.touch_move(self.touch.x, self.touch.y+100)
+            Clock.schedule_once(self.finish_cancel, .7)
+        self.guarded(run)
+
+    def finish_cancel(self, _):
+        def run():
+            self.touch.touch_up()
+            assert not any(isinstance(w, Popup) for w in Window.children), '이동 후 길게 누르기 취소 실패'
+            assert self.on_pause() is True
+            self.stop()
+        self.guarded(run)
+
 
 if __name__ == '__main__':
     app = SmokeApp()
@@ -76,4 +141,4 @@ if __name__ == '__main__':
     app.temporary.cleanup()
     if app.failed:
         raise app.failed
-    print('MOBILE_UI_SMOKE_OK: 3 themes, 5 tabs, search, navigation, persistence, popup')
+    print('MOBILE_UI_SMOKE_OK: 3 themes, 5 tabs, search, navigation, restart, short tap, hold, pin/unpin, move cancellation, pause')

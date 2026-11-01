@@ -243,7 +243,7 @@ class ToolboxApp(App):
             card = Surface(self.colors['panel'], self.colors['border'], orientation='vertical',
                            size_hint_y=None, height=dp(118), padding=dp(16), spacing=dp(5))
             card.add_widget(self.label('PC 연결 대기', 17))
-            card.add_widget(self.label('독립 도구는 PC 연결 없이 이용할 수 있어요.', 12, True))
+            card.add_widget(self.label('모바일 독립 도구를 준비하고 있어요.', 12, True))
             card.add_widget(self.label('Cloudflare 연동은 준비 중입니다.', 12, True))
             add(card)
             add(self.label('빠르게 둘러보기', 18, height=34))
