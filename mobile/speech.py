@@ -11,6 +11,7 @@ class SpeechController:
         self.voice = ''
         self.engine = ''
         self.ready = False
+        self.catalogue_received = False
         self.closed = False
         self.active_id = ''
         self.status = 'Android 기기에서 사용할 수 있는 기능입니다.' if factory is None else '음성 엔진을 준비해 주세요.'
@@ -19,6 +20,7 @@ class SpeechController:
         if self.closed or self.factory is None:
             return
         self.active_id, self.ready, self.voices, self.voice = '', False, [], ''
+        self.catalogue_received = False
         self.engine, self.status = engine, '음성 엔진을 준비하고 있습니다.'
         try:
             if self.backend is None:
@@ -32,6 +34,7 @@ class SpeechController:
         if self.closed:
             return
         if event == 'catalogue':
+            self.catalogue_received = True
             self.engines = payload.get('engines', [])
             self.voices = payload.get('voices', [])
             self.ready = bool(payload.get('ready') and self.voices)

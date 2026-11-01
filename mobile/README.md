@@ -102,6 +102,27 @@ APK 내부 진입점·arm64 Python·TTS Java 클래스·글꼴/로고/라이선�
 성공 시 `s2-toolbox-android-debug` 아티팩트에 APK와 SHA256SUMS를 저장한다.
 이는 테스트용 디버그 빌드이며 실제 기기 설치·청취·출시 서명 검증은 별도다.
 
+빌드 다음에는 Google APIs x86_64 이미지의 ARM 변환 기능을 이용해 Android API 30·35에서
+같은 arm64 APK를 설치하고 검사하도록 구성했다. 해당 이미지의 arm64 지원을 실행 시 확인하며,
+지원하지 않으면 성공으로 간주하지 않는다. 에뮬레이터 검사 자체는 실제 Actions 실행으로 검증해야 한다.
+검사는 홈·5개 탭 연결·세 테마·변환기·메모 저장·실제 MediaPlayer 완료·TTS 목록 응답을 확인한다.
+강제 종료 뒤 재실행하여 테마·고정·메모·오디오 복원을 별도로 확인한다.
+한국어 오프라인 음성이 없는 이미지는 누락 안내 처리만 검사하며 한국어 청취 성공으로 기록하지 않는다.
+API 30 이상에서는 시스템 바·노치 여백을 네이티브 콘텐츠에 적용하고 테마별 아이콘 명암을 변경한다.
+
+검사 모드는 디버그 플래그와 명시적인 `s2_smoke_test` Intent가 모두 있어야 동작한다.
+검사 데이터는 일반 프로필과 분리한 `App.user_data_dir/android-qa/<실행 ID>/data`에 저장한다.
+호스트는 ADB로 JSON 결과·앱 화면·Android 전체 화면·logcat을 수집하며,
+필수 검사가 빠지거나 앱 보고서가 실패하면 Actions도 실패한다.
+수동 확인 시 APK 설치 후 아래 호스트 명령을 사용할 수 있다.
+
+```powershell
+py mobile/build_scripts/android_smoke.py --apk 경로/테스트.apk
+```
+
+이는 에뮬레이터/테스트 기기에서만 실행하는 개발자 검사다. 실제 스피커 청취·SAF 사용자 선택·
+장치별 키보드/접근성·최소 API 26 기기 검사는 후속으로 유지한다.
+
 ## Android APK 빌드
 
 Kivy 공식 문서는 Buildozer를 Linux/macOS 또는 Windows의 WSL에서 실행하도록 안내한다.

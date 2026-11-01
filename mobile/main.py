@@ -187,8 +187,21 @@ class ToolboxApp(App):
         return THEMES[self.state.theme]
 
     def build(self):
-        self.state = State(Path(self.user_data_dir) / 'mobile-settings.json')
-        self.scratchpad = Scratchpad(Path(self.user_data_dir) / 'scratchpad.txt')
+        self.qa_request = None
+        self.data_root = Path(self.user_data_dir)
+        if platform == 'android':
+            try:
+                try:
+                    from .android_qa import requested
+                except ImportError:
+                    from android_qa import requested
+                self.qa_request = requested()
+                if self.qa_request:
+                    self.data_root = self.data_root / 'android-qa' / self.qa_request['run'] / 'data'
+            except Exception:
+                pass
+        self.state = State(self.data_root / 'mobile-settings.json')
+        self.scratchpad = Scratchpad(self.data_root / 'scratchpad.txt')
         self.note_draft = self.scratchpad.text
         self.note_timer = None
         self.note_status = None
@@ -196,7 +209,7 @@ class ToolboxApp(App):
         self.converter = dict(operation='JSON 정리', text='', result='', status='', source='10', target='16')
         self.speech_text, self.speech_rate = '', '1.0'
         self.speech = SpeechController(AndroidSpeechBackend if platform == 'android' else None, self.speech_changed)
-        self.soundboard = SoundboardController(Path(self.user_data_dir) / 'audio',
+        self.soundboard = SoundboardController(self.data_root / 'audio',
                                                AndroidAudioBackend if platform == 'android' else KivyAudioBackend,
                                                self.soundboard_changed,
                                                lambda call: Clock.schedule_once(lambda _: call(),0))
@@ -292,6 +305,24 @@ class ToolboxApp(App):
             nav.add_widget(button)
             self.nav_buttons[slot] = button
         self.root_box.add_widget(nav)
+        if platform == 'android':
+            Clock.schedule_once(lambda _: self.android_chrome(),0)
+
+    def android_chrome(self):
+        if platform != 'android':
+            return
+        from jnius import autoclass
+        activity = autoclass('org.kivy.android.PythonActivity').mActivity
+        autoclass('io.seoul2line.toolbox.SystemBars').apply(activity,self.colors['panel'],self.state.theme!='dark')
+
+    def on_start(self):
+        if self.qa_request:
+            try:
+                from .android_qa import AndroidSmoke
+            except ImportError:
+                from android_qa import AndroidSmoke
+            self.android_probe = AndroidSmoke(self,self.qa_request)
+            self.android_probe.start()
 
     def build_page(self):
         add = self.content.add_widget
