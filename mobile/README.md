@@ -19,12 +19,18 @@ py mobile/main.py
 홈·설정은 고정이며 나머지 탭은 0.55초 길게 눌러 현재 항목 고정·다른 항목 선택·고정 해제가 가능하다.
 설정 화면에서도 같은 기능에 접근할 수 있다. 동일 항목을 다른 슬롯에 고정하면 기존 고정을 이동한다.
 
-현재 개별 도구 화면은 준비 안내다. TTS·사운드보드·변환기·메모, PC 연결, TC 동기화는 아직 구현하지 않았다.
+개발자 변환기와 스크래치패드는 오프라인으로 동작한다.
+TTS·사운드보드·PC 연결·TC 동기화는 아직 준비 안내 화면이다.
 PC 연결 및 TC 잔액을 실제 연결된 것처럼 표시하지 않으며 네트워크 요청도 하지 않는다.
 
 ## 데이터와 리소스
 
 - 개인화: Kivy `App.user_data_dir`의 `mobile-settings.json`. 테마·사용 횟수·고정값만 저장한다.
+- 메모: 같은 폴더의 `scratchpad.txt`. 0.7초 입력 대기 후, 화면 이동·테마 변경·앱 일시정지·종료 때 저장한다.
+- 메모는 최대 200,000자이며 이전 저장본 `scratchpad.previous.txt` 한 단계를 보관한다.
+  복구는 확인창에서 실행하며 교체 전 현재 파일은 `scratchpad.before-restore.txt`에 보관한다.
+  읽을 수 없는 기존 파일은 자동 덮어쓰지 않는다. 저장 실패는 메모 화면에 표시하고 입력을 유지한다.
+- 변환기 입력/결과는 앱 실행 중 메모리에만 보관한다. 입력·방식 변경 시 이전 결과를 지운다.
 - PC `config.json`을 읽거나 복사하지 않는다. 임시 파일을 쓴 뒤 원자적으로 교체한다.
 - 한국어 글꼴: Google Fonts의 Nanum Gothic, SIL Open Font License. `assets/OFL.txt` 동봉.
 - 기존 로고를 `assets/toolbox-logo.png`로 복사하여 PC 폴더 없이 패키징한다.
@@ -34,7 +40,9 @@ PC 연결 및 TC 잔액을 실제 연결된 것처럼 표시하지 않으며 네
 
 ```powershell
 py -m unittest mobile.tests.test_model -v
+py -m unittest mobile.tests.test_offline_tools -v
 py -m mobile.tests.smoke_ui
+py -m mobile.tests.smoke_offline
 ```
 
 두 번째 명령은 실제 Kivy 창을 실행한다. 임시 설정 경로로 홈·검색·설정·PC 메뉴와
@@ -42,6 +50,15 @@ py -m mobile.tests.smoke_ui
 합성 터치로 짧은 탭·0.55초 길게 누르기·의도하지 않은 이동 방지·고정/해제 저장·
 손가락 이동 후 취소를 확인하고 Android 앱 일시정지 콜백의 저장 반환도 검사한다.
 이는 Windows 검사이며 Android 설치·키보드·시스템 인셋·실물 터치 검증을 대신하지 않는다.
+
+## 오프라인 도구
+
+변환기는 JSON 정리/압축, UTF-8 Base64 인코딩/디코딩, 2·8·10·16진수 정수 변환을 제공한다.
+변환 입력은 32,768자, 정수는 접두사를 제외한 1,024자리까지 지원한다.
+JSON은 숫자 토큰의 정밀도를 보존하고 중복 키·NaN/Infinity를 거부한다.
+중첩 64단계와 결과 262,144자 제한을 두어 과도한 출력으로 화면이 멈추는 상황을 줄인다.
+메모는 자동 저장 상태와 글자 수를 표시하며 이전 저장본 복구가 가능하다.
+이 데이터는 Android 앱 전용 경로에 저장되며 앱 삭제 시 제거될 수 있다.
 
 ## Android APK 빌드
 

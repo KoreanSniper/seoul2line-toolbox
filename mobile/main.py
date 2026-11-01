@@ -15,6 +15,7 @@ if platform not in ('android', 'ios'):
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.text import LabelBase
+from kivy.core.clipboard import Clipboard
 from kivy.core.window import Window
 from kivy.graphics import Color, RoundedRectangle, Line, Mesh, Ellipse
 from kivy.metrics import dp
@@ -26,10 +27,15 @@ from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
+from kivy.uix.spinner import Spinner
 try:
     from .model import State, THEMES, MENUS, TOOLS
+    from .offline_tools import (Scratchpad, format_json, encode_base64, decode_base64,
+                                convert_base, MAX_NOTE)
 except ImportError:
     from model import State, THEMES, MENUS, TOOLS
+    from offline_tools import (Scratchpad, format_json, encode_base64, decode_base64,
+                               convert_base, MAX_NOTE)
 
 ASSETS = Path(__file__).resolve().parent / 'assets'
 LabelBase.register(name='S2Korean', fn_regular=str(ASSETS / 'NanumGothic-Regular.ttf'))
@@ -79,7 +85,8 @@ class NavButton(Button):
     """글꼴에 의존하지 않는 선 아이콘과 길게 누르기."""
     def __init__(self, icon, held=None, **kwargs):
         super().__init__(font_name='S2Korean', font_size=dp(11), background_normal='',
-                         background_down='', background_color=(0, 0, 0, 0), **kwargs)
+                         background_down='', background_color=(0, 0, 0, 0),
+                         shorten=True, shorten_from='right', max_lines=1, **kwargs)
         self.icon, self.held, self.timer, self.did_hold = icon, held, None, False
         self.valign = 'bottom'
         self.halign = 'center'
@@ -153,8 +160,14 @@ class ToolboxApp(App):
 
     def build(self):
         self.state = State(Path(self.user_data_dir) / 'mobile-settings.json')
+        self.scratchpad = Scratchpad(Path(self.user_data_dir) / 'scratchpad.txt')
+        self.note_draft = self.scratchpad.text
+        self.note_timer = None
+        self.note_status = None
+        self.converter = dict(operation='JSON 정리', text='', result='', status='', source='10', target='16')
         self.page = 'home'
         self.root_box = BoxLayout(orientation='vertical')
+        Window.softinput_mode = 'below_target'
         Window.bind(on_keyboard=self.back)
         self.render()
         return self.root_box
@@ -179,6 +192,7 @@ class ToolboxApp(App):
             self.notice('저장 오류', self.state.error)
 
     def go(self, key):
+        self.flush_note()
         self.state.visit(key)
         self.page = key
         self.persist()
@@ -188,6 +202,7 @@ class ToolboxApp(App):
         p = self.colors
         Window.clearcolor = rgba(p['bg'])
         self.root_box.clear_widgets()
+        self.note_status = None
         header = Surface(p['panel'], p['border'], orientation='horizontal', size_hint_y=None,
                          height=dp(88), padding=[dp(16),dp(12)], spacing=dp(10))
         logo = LogoButton(source=str(ASSETS / 'toolbox-logo.png'), size_hint_x=None, width=dp(58))
@@ -243,13 +258,17 @@ class ToolboxApp(App):
             card = Surface(self.colors['panel'], self.colors['border'], orientation='vertical',
                            size_hint_y=None, height=dp(118), padding=dp(16), spacing=dp(5))
             card.add_widget(self.label('PC 연결 대기', 17))
-            card.add_widget(self.label('모바일 독립 도구를 준비하고 있어요.', 12, True))
+            card.add_widget(self.label('변환기와 메모는 오프라인으로 사용할 수 있어요.', 12, True))
             card.add_widget(self.label('Cloudflare 연동은 준비 중입니다.', 12, True))
             add(card)
             add(self.label('빠르게 둘러보기', 18, height=34))
             for key in ('converter','scratchpad','tts','soundboard'):
                 self.tool_card(key)
             add(self.label('추천 탭을 길게 눌러 고정할 수 있어요.', 12, True, 36))
+        elif self.page == 'converter':
+            self.build_converter()
+        elif self.page == 'scratchpad':
+            self.build_scratchpad()
         elif self.page == 'settings':
             add(self.label('설정', 26, height=46))
             add(self.label('내 Toolbox의 분위기', 15))
@@ -304,6 +323,7 @@ class ToolboxApp(App):
             self.results.add_widget(self.label('검색 결과가 없습니다.', 14, True, 60))
 
     def theme(self, key):
+        self.flush_note()
         self.state.theme = key
         self.persist()
         self.render()
@@ -344,11 +364,152 @@ class ToolboxApp(App):
         return False
 
     def on_pause(self):
+        self.flush_note()
         self.persist()
         return True
 
     def on_stop(self):
+        self.flush_note()
         self.persist()
+
+    def input_field(self, text='', height=180, readonly=False):
+        return TextInput(text=text, font_name='S2Korean', font_size=dp(14), multiline=True,
+                         readonly=readonly, size_hint_y=None, height=dp(height), padding=dp(12),
+                         background_normal='', background_active='',
+                         background_color=rgba(self.colors['panel']),
+                         foreground_color=rgba(self.colors['text']), cursor_color=rgba(self.colors['accent']))
+
+    def spinner(self, text, values, callback):
+        widget = Spinner(text=text, values=values, font_name='S2Korean', font_size=dp(14),
+                         size_hint_y=None, height=dp(48), background_normal='',
+                         background_color=rgba(self.colors['panel']), color=rgba(self.colors['text']))
+        # 드롭다운 항목도 한국어 글꼴을 사용한다.
+        from kivy.uix.spinner import SpinnerOption
+        class KoreanOption(SpinnerOption):
+            def __init__(self, **kwargs):
+                super().__init__(font_name='S2Korean', font_size=dp(14), height=dp(48), **kwargs)
+        widget.option_cls = KoreanOption
+        widget.bind(text=lambda _, value: callback(value))
+        return widget
+
+    def build_converter(self):
+        add = self.content.add_widget
+        add(self.label('개발자 변환기', 26, height=46))
+        add(self.label('네트워크 없이 변환 · 입력 32,768자 이내', 12, True))
+        operations = ('JSON 정리', 'JSON 압축', 'Base64 인코딩', 'Base64 디코딩', '진법 변환')
+        def operation(value):
+            self.update_conversion(operation=value)
+            self.render()
+        add(self.spinner(self.converter['operation'], operations, operation))
+        if self.converter['operation'] == '진법 변환':
+            add(self.label('입력 진법  →  출력 진법', 13, True))
+            row = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(10))
+            for key in ('source','target'):
+                row.add_widget(self.spinner(self.converter[key], ('2','8','10','16'),
+                                             lambda value, k=key: self.update_conversion(**{k:value})))
+            add(row)
+        self.converter_input = self.input_field(self.converter['text'], 170)
+        self.converter_input.hint_text = '변환할 내용을 입력하세요'
+        self.converter_input.hint_text_color = rgba(self.colors['muted'])
+        self.converter_input.bind(text=lambda _, value: self.update_conversion(text=value))
+        add(self.converter_input)
+        add(self.button('변환하기', self.run_converter, True))
+        self.converter_status = self.label(self.converter['status'], 12, True, 50)
+        add(self.converter_status)
+        self.converter_output = self.input_field(self.converter['result'], 170, readonly=True)
+        add(self.converter_output)
+        add(self.button('결과 복사', self.copy_conversion))
+
+    def update_conversion(self, **changes):
+        self.converter.update(changes)
+        self.converter.update(result='', status='입력이 변경되었습니다. 변환하기를 눌러 주세요.')
+        if self.page == 'converter' and hasattr(self, 'converter_output'):
+            self.converter_output.text = ''
+            self.converter_status.text = self.converter['status']
+
+    def run_converter(self):
+        c = self.converter
+        try:
+            op, text = c['operation'], c['text']
+            if op.startswith('JSON'):
+                result = format_json(text, compact=op == 'JSON 압축')
+            elif op == 'Base64 인코딩':
+                result = encode_base64(text)
+            elif op == 'Base64 디코딩':
+                result = decode_base64(text)
+            else:
+                result = convert_base(text, int(c['source']), int(c['target']))
+            c.update(result=result, status=f'변환 완료 · {len(result):,}자')
+        except ValueError as exc:
+            c.update(result='', status=str(exc))
+        self.converter_output.text = c['result']
+        self.converter_status.text = c['status']
+
+    def copy_conversion(self):
+        if not self.converter['result']:
+            self.converter_status.text = '먼저 변환 결과를 만들어 주세요.'
+            return
+        try:
+            Clipboard.copy(self.converter['result'])
+            self.converter_status.text = '결과를 복사했습니다.'
+        except Exception:
+            self.converter_status.text = '복사하지 못했습니다. 결과를 길게 눌러 선택해 주세요.'
+
+    def build_scratchpad(self):
+        add = self.content.add_widget
+        add(self.label('스크래치패드', 26, height=46))
+        add(self.label('기기에만 저장 · 입력 후 자동 저장', 12, True))
+        self.note_input = self.input_field(self.note_draft, 310)
+        self.note_input.height = min(dp(310), max(dp(140), Window.height-dp(480)))
+        self.note_input.bind(text=self.note_changed)
+        add(self.note_input)
+        self.note_status = self.label('', 12, True, 52)
+        self.update_note_status()
+        add(self.note_status)
+        add(self.button('지금 저장', self.flush_note, True))
+        add(self.button('이전 저장본 복구', self.confirm_note_restore))
+        add(self.label('이전 저장본은 한 단계 보관합니다.', 12, True, 40))
+
+    def note_changed(self, _, text):
+        self.note_draft = text
+        if self.note_timer:
+            self.note_timer.cancel()
+        self.note_timer = Clock.schedule_once(lambda _: self.flush_note(), .7)
+        self.update_note_status(pending=True)
+
+    def update_note_status(self, pending=False):
+        if self.note_status is not None:
+            status = self.scratchpad.error or ('저장 대기 중' if pending else '기기에 저장됨')
+            if not self.scratchpad.path.exists() and not pending and not self.scratchpad.error:
+                status = '메모를 입력해 주세요'
+            self.note_status.text = f'{len(self.note_draft):,} / {MAX_NOTE:,}자 · {status}'
+
+    def flush_note(self):
+        if self.note_timer:
+            self.note_timer.cancel()
+            self.note_timer = None
+        if self.note_draft != self.scratchpad.text:
+            self.scratchpad.save(self.note_draft)
+        self.update_note_status()
+
+    def confirm_note_restore(self):
+        self.flush_note()
+        if self.note_draft != self.scratchpad.text:
+            self.notice('복구 안내', '현재 메모를 저장하지 못해 복구를 중단했습니다.')
+            return
+        box = BoxLayout(orientation='vertical', spacing=dp(10), padding=dp(12))
+        box.add_widget(self.label('이전 저장본으로 바꿀까요?\n현재 저장본도 별도로 보관합니다.', 13, height=72))
+        popup = Popup(title='메모 복구', title_font='S2Korean', content=box,
+                      size_hint=(.92,None), height=dp(260))
+        def restore():
+            text = self.scratchpad.restore_previous()
+            if text is not None:
+                self.note_draft = text
+            popup.dismiss()
+            self.render()
+        box.add_widget(self.button('이전 저장본으로 복구', restore, True))
+        box.add_widget(self.button('취소', popup.dismiss))
+        popup.open()
 
 
 if __name__ == '__main__':
