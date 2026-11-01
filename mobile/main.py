@@ -88,10 +88,13 @@ class NavButton(Button):
                          background_down='', background_color=(0, 0, 0, 0),
                          shorten=True, shorten_from='right', max_lines=1, **kwargs)
         self.icon, self.held, self.timer, self.did_hold = icon, held, None, False
+        self.hold_touch = None
+        self.gesture_cancelled = False
         self.valign = 'bottom'
         self.halign = 'center'
         self.padding = (0, dp(6))
         self.bind(pos=self.draw, size=self.draw, color=self.draw)
+        self.bind(parent=self.parent_changed)
 
     def draw(self, *_):
         self.text_size = self.size
@@ -124,30 +127,50 @@ class NavButton(Button):
                     line([(a*.7,b*.7),(a*1.1,b*1.1)])
 
     def on_touch_down(self, touch):
-        if self.collide_point(*touch.pos) and self.held:
+        accepted = super().on_touch_down(touch)
+        if accepted and self.collide_point(*touch.pos) and self.held and self.hold_touch is None:
+            self.hold_touch = touch
             self.did_hold = False
+            self.gesture_cancelled = False
             self.timer = Clock.schedule_once(self.long_press, .55)
             self.start_touch = touch.pos
-        return super().on_touch_down(touch)
+        return accepted
 
     def on_touch_move(self, touch):
-        if self.timer and (abs(touch.x-self.start_touch[0]) + abs(touch.y-self.start_touch[1]) > dp(15)):
-            self.timer.cancel()
+        if touch is self.hold_touch and (abs(touch.x-self.start_touch[0]) + abs(touch.y-self.start_touch[1]) > dp(15)):
+            self.cancel_timer()
+            self.gesture_cancelled = True
         return super().on_touch_move(touch)
 
     def on_touch_up(self, touch):
-        if self.timer:
-            self.timer.cancel()
-        if self.did_hold and touch.grab_current is self:
-            touch.ungrab(self)
-            self.state = 'normal'
+        if touch is self.hold_touch and touch.grab_current is self:
+            self.cancel_timer()
+            self.hold_touch = None
+            suppressed = self.did_hold or self.gesture_cancelled or self.get_root_window() is None
             self.did_hold = False
-            return True
+            if suppressed:
+                touch.ungrab(self)
+                self.state = 'normal'
+                return True
         return super().on_touch_up(touch)
 
     def long_press(self, _):
+        self.timer = None
+        if self.get_root_window() is None or self.gesture_cancelled:
+            self.gesture_cancelled = True
+            return
         self.did_hold = True
         self.held()
+
+    def cancel_timer(self):
+        if self.timer:
+            self.timer.cancel()
+            self.timer = None
+
+    def parent_changed(self, _, parent):
+        if parent is None:
+            self.cancel_timer()
+            self.gesture_cancelled = True
 
 
 class ToolboxApp(App):
@@ -164,9 +187,11 @@ class ToolboxApp(App):
         self.note_draft = self.scratchpad.text
         self.note_timer = None
         self.note_status = None
+        self.last_save_error = ''
         self.converter = dict(operation='JSON 정리', text='', result='', status='', source='10', target='16')
         self.page = 'home'
         self.root_box = BoxLayout(orientation='vertical')
+        self.root_box.bind(size=self.fit_note)
         Window.softinput_mode = 'below_target'
         Window.bind(on_keyboard=self.back)
         self.render()
@@ -189,7 +214,11 @@ class ToolboxApp(App):
 
     def persist(self):
         if not self.state.save():
-            self.notice('저장 오류', self.state.error)
+            if self.last_save_error != self.state.error:
+                self.notice('저장 오류', self.state.error)
+                self.last_save_error = self.state.error
+        else:
+            self.last_save_error = ''
 
     def go(self, key):
         self.flush_note()
@@ -282,6 +311,8 @@ class ToolboxApp(App):
             add(self.label('S2 Toolbox Mobile · 0.1.0', 12, True, 48))
             if self.state.error:
                 add(self.label(self.state.error, 12, True, 60))
+                if not self.state.readable:
+                    add(self.button('기존 설정 백업 후 초기화', self.confirm_settings_reset))
         elif self.page == 'search':
             add(self.label('도구 검색', 26, height=46))
             field = TextInput(hint_text='이름 또는 기능으로 검색', multiline=False, font_name='S2Korean',
@@ -460,7 +491,7 @@ class ToolboxApp(App):
         add(self.label('스크래치패드', 26, height=46))
         add(self.label('기기에만 저장 · 입력 후 자동 저장', 12, True))
         self.note_input = self.input_field(self.note_draft, 310)
-        self.note_input.height = min(dp(310), max(dp(140), Window.height-dp(480)))
+        self.fit_note()
         self.note_input.bind(text=self.note_changed)
         add(self.note_input)
         self.note_status = self.label('', 12, True, 52)
@@ -469,6 +500,10 @@ class ToolboxApp(App):
         add(self.button('지금 저장', self.flush_note, True))
         add(self.button('이전 저장본 복구', self.confirm_note_restore))
         add(self.label('이전 저장본은 한 단계 보관합니다.', 12, True, 40))
+
+    def fit_note(self, *_):
+        if self.page == 'scratchpad' and hasattr(self, 'note_input'):
+            self.note_input.height = min(dp(310), max(dp(140), self.root_box.height-dp(480)))
 
     def note_changed(self, _, text):
         self.note_draft = text
@@ -490,6 +525,8 @@ class ToolboxApp(App):
             self.note_timer = None
         if self.note_draft != self.scratchpad.text:
             self.scratchpad.save(self.note_draft)
+        elif self.scratchpad.loaded:
+            self.scratchpad.error = ''
         self.update_note_status()
 
     def confirm_note_restore(self):
@@ -508,6 +545,22 @@ class ToolboxApp(App):
             popup.dismiss()
             self.render()
         box.add_widget(self.button('이전 저장본으로 복구', restore, True))
+        box.add_widget(self.button('취소', popup.dismiss))
+        popup.open()
+
+    def confirm_settings_reset(self):
+        box = BoxLayout(orientation='vertical', spacing=dp(8), padding=dp(12))
+        box.add_widget(self.label('기존 설정 파일을 별도 보관한 뒤\n테마·사용 횟수·고정을 초기화합니다.\n메모는 유지됩니다.', 13, height=84))
+        popup = Popup(title='설정 복구', title_font='S2Korean', content=box,
+                      size_hint=(.92,None), height=dp(270))
+        def reset():
+            if self.state.reset():
+                self.last_save_error = ''
+                popup.dismiss()
+                self.render()
+            else:
+                self.notice('설정 복구 실패', self.state.error)
+        box.add_widget(self.button('백업 후 초기화', reset, True))
         box.add_widget(self.button('취소', popup.dismiss))
         popup.open()
 

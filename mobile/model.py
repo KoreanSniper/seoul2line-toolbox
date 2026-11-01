@@ -2,6 +2,8 @@
 import json
 import os
 from pathlib import Path
+import shutil
+import time
 
 
 MENUS = {'audio': '오디오', 'developer': '개발 도구', 'notes': '메모', 'pc': 'PC 연동'}
@@ -32,10 +34,13 @@ class State:
         self.counts = {}
         self.pins = {}
         self.error = ''
+        self.readable = True
         self.load()
 
     def load(self):
         try:
+            if self.path.stat().st_size > 262_144:
+                raise ValueError('설정 파일 크기 제한 초과')
             data = json.loads(self.path.read_text(encoding='utf-8'))
             if not isinstance(data, dict):
                 raise ValueError('설정 형식 오류')
@@ -55,9 +60,12 @@ class State:
         except FileNotFoundError:
             pass
         except (OSError, ValueError, TypeError):
-            self.error = '설정을 읽지 못했습니다. 저장 전 기존 파일을 확인해 주세요.'
+            self.readable = False
+            self.error = '설정을 읽지 못해 자동 저장을 중단했습니다. 설정에서 백업 후 초기화해 주세요.'
 
     def save(self):
+        if not self.readable:
+            return False
         temporary = self.path.with_suffix('.tmp')
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -70,6 +78,19 @@ class State:
         except OSError:
             self.error = '설정 저장에 실패했습니다. 저장 공간을 확인해 주세요.'
             return False
+
+    def reset(self):
+        """UI 확인 후에만 호출하며 기존 파일을 별도 보존한다."""
+        try:
+            if self.path.exists():
+                backup = self.path.with_name(f'{self.path.stem}.before-reset-{time.time_ns()}.json')
+                shutil.copyfile(self.path, backup)
+        except OSError:
+            self.error = '기존 설정을 백업하지 못해 초기화하지 않았습니다.'
+            return False
+        self.theme, self.counts, self.pins = 'dark', {}, {}
+        self.readable = True
+        return self.save()
 
     def visit(self, key):
         if key in MENUS or key in TOOLS:

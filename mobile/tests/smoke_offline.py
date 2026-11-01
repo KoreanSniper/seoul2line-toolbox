@@ -87,6 +87,7 @@ class OfflineSmokeApp(ToolboxApp):
         self.capture('offline-note-light-320.png')
 
     def restore_note(self):
+        assert self.note_input.height <= 170, '화면 축소 후 메모 입력 높이가 줄지 않음'
         self.confirm_note_restore()
         popup = next(w for w in Window.children if isinstance(w, Popup))
         next(w for w in popup.content.children if getattr(w,'text','') == '이전 저장본으로 복구').dispatch('on_release')

@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 from mobile.model import State, MENUS, TOOLS
 
 
@@ -77,6 +78,33 @@ class MobileStateTests(unittest.TestCase):
         self.assertEqual(state.pins, {'menu1':'pc','tool1':'tts'})
         for slot, value in state.tabs().items():
             self.assertIn(value, TOOLS if slot == 'tool1' else MENUS)
+
+    def test_unreadable_settings_block_save_until_explicit_backed_up_reset(self):
+        self.path.write_bytes(b'\xffbroken')
+        state = State(self.path)
+        self.assertFalse(state.readable)
+        self.assertFalse(state.save())
+        self.assertEqual(self.path.read_bytes(), b'\xffbroken')
+        self.assertTrue(state.reset())
+        backups = list(self.path.parent.glob('settings.before-reset-*.json'))
+        self.assertEqual(len(backups),1)
+        self.assertEqual(backups[0].read_bytes(),b'\xffbroken')
+        self.assertTrue(State(self.path).readable)
+
+    def test_settings_backup_failure_prevents_reset(self):
+        self.path.write_text('broken',encoding='utf-8')
+        state = State(self.path)
+        with patch('mobile.model.shutil.copyfile',side_effect=OSError('disk')):
+            self.assertFalse(state.reset())
+        self.assertFalse(state.readable)
+        self.assertEqual(self.path.read_text(encoding='utf-8'),'broken')
+
+    def test_oversized_settings_are_not_loaded_or_overwritten(self):
+        self.path.write_bytes(b' '*262_145)
+        state = State(self.path)
+        self.assertFalse(state.readable)
+        self.assertFalse(state.save())
+        self.assertEqual(self.path.stat().st_size,262_145)
 
 
 if __name__ == '__main__':

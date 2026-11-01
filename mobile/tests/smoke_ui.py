@@ -92,6 +92,10 @@ class SmokeApp(ToolboxApp):
             self.before_hold = self.page
             self.touch = UnitTestTouch(*self.nav_buttons['menu2'].center)
             self.touch.touch_down()
+            # 다른 손가락의 접촉/해제가 기존 길게 누르기를 취소하면 안 된다.
+            other = UnitTestTouch(Window.width-30, Window.height-110)
+            other.touch_down()
+            other.touch_up()
             Clock.schedule_once(self.finish_hold, .7)
         self.guarded(run)
 
@@ -131,6 +135,36 @@ class SmokeApp(ToolboxApp):
             self.touch.touch_up()
             assert not any(isinstance(w, Popup) for w in Window.children), '이동 후 길게 누르기 취소 실패'
             assert self.on_pause() is True
+            self.touch = UnitTestTouch(*self.nav_buttons['menu1'].center)
+            self.touch.touch_down()
+            self.go('home')
+            Clock.schedule_once(self.check_removed_button, .7)
+        self.guarded(run)
+
+    def check_removed_button(self, _):
+        def run():
+            self.touch.touch_up()
+            assert self.page == 'home'
+            assert not any(isinstance(w, Popup) for w in Window.children), '제거된 탭에서 고정창 열림'
+            self.note_draft = '설정 초기화에서도 유지할 메모'
+            self.flush_note()
+            self.state.path.write_bytes(b'\xffbroken-settings')
+            self.state = State(self.state.path)
+            self.last_save_error = self.state.error
+            self.go('settings')
+            self.confirm_settings_reset()
+            Clock.schedule_once(self.reset_settings, .3)
+        self.guarded(run)
+
+    def reset_settings(self, _):
+        def run():
+            popup = next(w for w in Window.children if isinstance(w, Popup))
+            next(w for w in popup.content.children if getattr(w,'text','') == '백업 후 초기화').dispatch('on_release')
+            assert State(self.state.path).readable
+            backups = list(self.state.path.parent.glob('mobile-settings.before-reset-*.json'))
+            assert len(backups) == 1
+            assert backups[0].read_bytes() == b'\xffbroken-settings'
+            assert self.scratchpad.path.read_text(encoding='utf-8') == '설정 초기화에서도 유지할 메모'
             self.stop()
         self.guarded(run)
 
@@ -141,4 +175,4 @@ if __name__ == '__main__':
     app.temporary.cleanup()
     if app.failed:
         raise app.failed
-    print('MOBILE_UI_SMOKE_OK: 3 themes, 5 tabs, search, navigation, restart, short tap, hold, pin/unpin, move cancellation, pause')
+    print('MOBILE_UI_SMOKE_OK: 3 themes, 5 tabs, search, restart, tap/hold, multi-touch, pin/unpin, move/detach cancellation, pause, backed-up settings reset')

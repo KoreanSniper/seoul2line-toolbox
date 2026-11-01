@@ -26,6 +26,8 @@ PC 연결 및 TC 잔액을 실제 연결된 것처럼 표시하지 않으며 네
 ## 데이터와 리소스
 
 - 개인화: Kivy `App.user_data_dir`의 `mobile-settings.json`. 테마·사용 횟수·고정값만 저장한다.
+  손상되거나 256KiB를 넘는 설정은 자동 덮어쓰지 않는다. 설정 화면의 복구 버튼으로
+  원본을 `mobile-settings.before-reset-시각.json`에 백업한 뒤 초기화할 수 있다. 메모는 유지한다.
 - 메모: 같은 폴더의 `scratchpad.txt`. 0.7초 입력 대기 후, 화면 이동·테마 변경·앱 일시정지·종료 때 저장한다.
 - 메모는 최대 200,000자이며 이전 저장본 `scratchpad.previous.txt` 한 단계를 보관한다.
   복구는 확인창에서 실행하며 교체 전 현재 파일은 `scratchpad.before-restore.txt`에 보관한다.
