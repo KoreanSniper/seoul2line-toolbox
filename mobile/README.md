@@ -20,7 +20,8 @@ py mobile/main.py
 설정 화면에서도 같은 기능에 접근할 수 있다. 동일 항목을 다른 슬롯에 고정하면 기존 고정을 이동한다.
 
 개발자 변환기와 스크래치패드는 오프라인으로 동작한다.
-TTS·사운드보드·PC 연결·TC 동기화는 아직 준비 안내 화면이다.
+TTS는 Android 기본 엔진 연결 코드를 구현했으며 실제 기기의 음성 출력은 검증 전이다.
+사운드보드·PC 연결·TC 동기화는 아직 준비 안내 화면이다.
 PC 연결 및 TC 잔액을 실제 연결된 것처럼 표시하지 않으며 네트워크 요청도 하지 않는다.
 
 ## 데이터와 리소스
@@ -43,8 +44,10 @@ PC 연결 및 TC 잔액을 실제 연결된 것처럼 표시하지 않으며 네
 ```powershell
 py -m unittest mobile.tests.test_model -v
 py -m unittest mobile.tests.test_offline_tools -v
+py -m unittest mobile.tests.test_speech -v
 py -m mobile.tests.smoke_ui
 py -m mobile.tests.smoke_offline
+py -m mobile.tests.smoke_speech
 ```
 
 두 번째 명령은 실제 Kivy 창을 실행한다. 임시 설정 경로로 홈·검색·설정·PC 메뉴와
@@ -62,6 +65,26 @@ JSON은 숫자 토큰의 정밀도를 보존하고 중복 키·NaN/Infinity를 �
 메모는 자동 저장 상태와 글자 수를 표시하며 이전 저장본 복구가 가능하다.
 이 데이터는 Android 앱 전용 경로에 저장되며 앱 삭제 시 제거될 수 있다.
 
+## Android TTS
+
+TTS 화면에서 엔진을 준비한 뒤 설치된 엔진·한국어 음성·속도를 선택하고 읽기/중지를 사용한다.
+네트워크가 필요하거나 설치되지 않은 것으로 보고된 음성은 목록에서 제외한다.
+입력은 UTF-16 기준 4,000자이며 화면 이동·앱 일시정지 시 중지하고 종료 시 엔진을 해제한다.
+음성이 없으면 Android 시스템 TTS 설정에서 한국어 오프라인 데이터를 먼저 설치해야 한다.
+Windows 미리보기에서는 읽기 기능을 비활성화한다. PC TTS·신경망 모델을 가져오지 않는다.
+현재 제어 상태 검사와 API 35 Java 컴파일 검사를 통과했으나 실제 합성·기기별 엔진 차이는 검증하지 않았다.
+
+## GitHub Actions 빌드
+
+사용자가 선택한 빌드 경로는 GitHub Actions다. `codex/mobile-android` 브랜치의 모바일 변경 또는
+수동 실행으로 `.github/workflows/android-apk.yml`을 실행한다.
+Ubuntu에서 모델·Kivy 화면 검사를 먼저 실행하고 Buildozer로 arm64 디버그 APK를 생성한다.
+Buildozer 1.6.0·python-for-android v2026.05.09의 커밋·NDK 28c를 고정한다.
+CI에서는 SDK 라이선스 확인 옵션을 자동 적용하며 로컬 설정은 수동 확인을 유지한다.
+APK 내부 진입점·arm64 Python·TTS Java 클래스·글꼴/로고/라이선스 원본 해시와 사용자 데이터 제외를 확인한다.
+성공 시 `s2-toolbox-android-debug` 아티팩트에 APK와 SHA256SUMS를 저장한다.
+이는 테스트용 디버그 빌드이며 실제 기기 설치·청취·출시 서명 검증은 별도다.
+
 ## Android APK 빌드
 
 Kivy 공식 문서는 Buildozer를 Linux/macOS 또는 Windows의 WSL에서 실행하도록 안내한다.
@@ -76,12 +99,15 @@ Windows PowerShell에서 직접 Buildozer를 실행하지 않는다.
 
 초기 대상: Android 8.0/API 26 이상, arm64-v8a, 세로 화면, target API 35.
 현재 빌드 설정은 초안이며 APK 생성·설치로 검증하기 전에는 Android 지원 확인으로 간주하지 않는다.
-SDK/NDK 다운로드와 빌드에는 인터넷이 필요하다. 현재 단계는 Android 권한을 요청하지 않는다.
+SDK/NDK 다운로드와 빌드에는 인터넷이 필요하다. 현재 단계는 Android 런타임 권한을 요청하지 않는다.
+TTS 엔진 검색을 위한 `<queries>` 항목과 Java 연결 클래스를 Buildozer에 등록했다.
 
 공식 참고:
 - [Kivy Android 패키징](https://kivy.org/doc/stable/guide/packaging-android.html)
 - [Buildozer 설치·WSL 안내](https://buildozer.readthedocs.io/en/latest/installation/)
 - [나눔고딕 원본과 라이선스](https://github.com/google/fonts/tree/main/ofl/nanumgothic)
+- [Android TTS API](https://developer.android.com/reference/android/speech/tts/TextToSpeech)
+- [Android 발화 진행 콜백](https://developer.android.com/reference/android/speech/tts/UtteranceProgressListener)
 
 ## 후속 설계
 

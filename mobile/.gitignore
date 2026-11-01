@@ -4,3 +4,4 @@ local_data/
 *.apk
 *.aab
 !buildozer.spec
+build-android.log

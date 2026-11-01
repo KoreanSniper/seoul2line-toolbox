@@ -32,10 +32,12 @@ try:
     from .model import State, THEMES, MENUS, TOOLS
     from .offline_tools import (Scratchpad, format_json, encode_base64, decode_base64,
                                 convert_base, MAX_NOTE)
+    from .speech import SpeechController, AndroidSpeechBackend
 except ImportError:
     from model import State, THEMES, MENUS, TOOLS
     from offline_tools import (Scratchpad, format_json, encode_base64, decode_base64,
                                convert_base, MAX_NOTE)
+    from speech import SpeechController, AndroidSpeechBackend
 
 ASSETS = Path(__file__).resolve().parent / 'assets'
 LabelBase.register(name='S2Korean', fn_regular=str(ASSETS / 'NanumGothic-Regular.ttf'))
@@ -189,6 +191,8 @@ class ToolboxApp(App):
         self.note_status = None
         self.last_save_error = ''
         self.converter = dict(operation='JSON 정리', text='', result='', status='', source='10', target='16')
+        self.speech_text, self.speech_rate = '', '1.0'
+        self.speech = SpeechController(AndroidSpeechBackend if platform == 'android' else None, self.speech_changed)
         self.page = 'home'
         self.root_box = BoxLayout(orientation='vertical')
         self.root_box.bind(size=self.fit_note)
@@ -222,6 +226,8 @@ class ToolboxApp(App):
 
     def go(self, key):
         self.flush_note()
+        if self.page == 'tts' and key != 'tts':
+            self.speech.stop()
         self.state.visit(key)
         self.page = key
         self.persist()
@@ -298,6 +304,8 @@ class ToolboxApp(App):
             self.build_converter()
         elif self.page == 'scratchpad':
             self.build_scratchpad()
+        elif self.page == 'tts':
+            self.build_speech()
         elif self.page == 'settings':
             add(self.label('설정', 26, height=46))
             add(self.label('내 Toolbox의 분위기', 15))
@@ -395,11 +403,16 @@ class ToolboxApp(App):
         return False
 
     def on_pause(self):
+        self.speech.stop()
         self.flush_note()
         self.persist()
         return True
 
     def on_stop(self):
+        try:
+            self.speech.close()
+        except Exception:
+            pass
         self.flush_note()
         self.persist()
 
@@ -563,6 +576,48 @@ class ToolboxApp(App):
         box.add_widget(self.button('백업 후 초기화', reset, True))
         box.add_widget(self.button('취소', popup.dismiss))
         popup.open()
+
+    def build_speech(self):
+        add = self.content.add_widget
+        add(self.label('텍스트 음성 읽기', 26, height=46))
+        add(self.label('설치된 한국어 오프라인 음성 · 최대 4,000자', 12, True))
+        engine_names = {'기본 엔진': ''}
+        engine_names.update({f"{e['label']} ({e['id']})":e['id'] for e in self.speech.engines})
+        selected = next((name for name,key in engine_names.items() if key == self.speech.engine),'기본 엔진')
+        engine_spinner = self.spinner(selected, tuple(engine_names),
+                                      lambda value: self.speech.connect(engine_names[value]))
+        engine_spinner.disabled = self.speech.factory is None
+        add(engine_spinner)
+        prepare = self.button('음성 엔진 다시 준비', lambda: self.speech.connect(self.speech.engine))
+        prepare.disabled = self.speech.factory is None
+        add(prepare)
+        voice_names = {v['label']:v['id'] for v in self.speech.voices}
+        selected_voice = next((name for name,key in voice_names.items() if key == self.speech.voice),'사용 가능한 음성 없음')
+        voices = self.spinner(selected_voice, tuple(voice_names),
+                              lambda value: setattr(self.speech,'voice',voice_names[value]))
+        voices.disabled = not bool(voice_names)
+        add(voices)
+        add(self.label('읽기 속도', 13, True))
+        add(self.spinner(self.speech_rate, ('0.5','0.75','1.0','1.25','1.5','2.0'),
+                         lambda value: setattr(self,'speech_rate',value)))
+        self.speech_input = self.input_field(self.speech_text, 150)
+        self.speech_input.bind(text=lambda _,value: setattr(self,'speech_text',value))
+        add(self.speech_input)
+        self.speech_play = self.button('읽기', lambda: self.speech.speak(self.speech_text,self.speech_rate), True)
+        self.speech_play.disabled = not self.speech.ready
+        add(self.speech_play)
+        add(self.button('중지', self.speech.stop))
+        self.speech_status = self.label(self.speech.status, 12, True, 68)
+        add(self.speech_status)
+
+    def speech_changed(self, catalogue=False):
+        if self.page != 'tts':
+            return
+        if catalogue:
+            self.render()
+        elif hasattr(self,'speech_status'):
+            self.speech_status.text = self.speech.status
+            self.speech_play.disabled = not self.speech.ready
 
 
 if __name__ == '__main__':

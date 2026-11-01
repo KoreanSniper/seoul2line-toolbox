@@ -1,5 +1,25 @@
 # 🛠️ seoul2line Toolbox 개발 체크리스트
 
+## 진행 중 — Android TTS 및 GitHub Actions APK
+
+사용자가 GitHub Actions 빌드와 원격 브랜치 업로드를 선택했다.
+Android 후속 01·02번은 실제 Actions 결과를 확인한 뒤 체크한다.
+
+- [x] 01. TTS 제어 모델·입력/속도 검증·발화 ID별 오래된 콜백 무시 구현·검증
+- [x] 02. Android 엔진·설치된 한국어 오프라인 음성·읽기/중지·진행/오류 Java 연결 구현
+- [x] 03. TTS 화면·엔진/음성/속도 선택·입력 보존·이동/일시정지/종료 처리 연결
+- [x] 04. TTS 서비스 queries·Buildozer Java 소스 등록·API 35 실제 Java 컴파일 확인
+- [x] 05. 제어 상태 9개·대역 기반 실제 Kivy TTS 화면·기존 상태/도구 25개 검사
+- [ ] 06. 원격 브랜치 업로드·Actions Linux 검사/빌드 실행 확인
+- [ ] 07. Actions 실패 원인 수정·arm64 APK 생성 및 내부 파일 검증
+- [ ] 08. 빌드 APK 다운로드·해시/패키지/설치 가능성 확인
+- [ ] 09. Android 기기 설치·한국어 실제 출력·중지·음성 데이터 누락 확인
+- [ ] 10. 사운드보드 로컬 목록·시스템 파일 선택·재생/중지·권한 처리 구현
+
+검증: 모델/도구 25개·TTS 상태 9개, 합계 34개 통과. 실제 Kivy TTS 화면은 대역 엔진으로 검사했다.
+Google 공식 저장소의 API 35 플랫폼 ZIP 해시를 확인하고 android.jar로 SpeechBridge.java 컴파일 통과.
+이는 Android 런타임/실제 청취 증거가 아니므로 기존 후속 08번 전체 검증은 아직 완료 처리하지 않는다.
+
 ## 진행 중 — 모바일 기본 도구 2차
 
 Android 후속 01번을 재확인했으나 현재 WSL Linux·Docker·adb가 없어 빌드 환경 선택을 요청했다.

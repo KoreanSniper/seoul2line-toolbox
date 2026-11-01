@@ -1,0 +1,97 @@
+name: Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["codex/mobile-android"]
+    paths:
+      - "mobile/**"
+      - ".github/workflows/android-apk.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install UI test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgl1-mesa-dri libgles2 libmtdev1 xclip xsel
+          python -m pip install -r mobile/requirements.txt
+      - name: Run model tests
+        run: python -m unittest discover -s mobile/tests -p 'test_*.py' -v
+      - name: Run Kivy screens
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          xvfb-run -a python -m mobile.tests.smoke_ui
+          xvfb-run -a python -m mobile.tests.smoke_offline
+          xvfb-run -a python -m mobile.tests.smoke_speech
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mobile-ui-previews
+          path: mobile/local_data/previews/*.png
+          if-no-files-found: warn
+
+  apk:
+    needs: tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install Android build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git zip unzip autoconf automake autopoint gettext libtool pkg-config zlib1g-dev libncurses-dev libtinfo6 cmake libffi-dev libssl-dev
+          python -m pip install -r mobile/build-requirements.txt
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer
+            mobile/.buildozer
+          key: android-arm64-${{ runner.os }}-${{ hashFiles('mobile/buildozer.spec', 'mobile/build-requirements.txt') }}
+      - name: Build arm64 debug APK
+        working-directory: mobile
+        env:
+          APP_ANDROID_ACCEPT_SDK_LICENSE: "True"
+        run: |
+          set -o pipefail
+          buildozer -v android debug 2>&1 | tee build-android.log
+      - name: Record APK checksums
+        working-directory: mobile
+        run: |
+          python build_scripts/verify_apk.py bin/*.apk
+          sha256sum bin/*.apk > bin/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: s2-toolbox-android-debug
+          path: |
+            mobile/bin/*.apk
+            mobile/bin/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-build-log
+          path: mobile/build-android.log
+          if-no-files-found: warn
