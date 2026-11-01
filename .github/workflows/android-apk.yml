@@ -80,7 +80,7 @@ jobs:
       - name: Record APK checksums
         working-directory: mobile
         run: |
-          python build_scripts/verify_apk.py bin/*.apk
+          python build_scripts/verify_apk.py --android-tools auto --report bin/APK_AUDIT.json bin/*.apk
           sha256sum bin/*.apk > bin/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
@@ -88,6 +88,7 @@ jobs:
           path: |
             mobile/bin/*.apk
             mobile/bin/SHA256SUMS.txt
+            mobile/bin/APK_AUDIT.json
           if-no-files-found: error
           retention-days: 14
       - uses: actions/upload-artifact@v4

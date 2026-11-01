@@ -99,8 +99,17 @@ Ubuntu에서 모델·Kivy 화면 검사를 먼저 실행하고 Buildozer로 arm6
 Buildozer 1.6.0·python-for-android v2026.05.09의 커밋·NDK 28c를 고정한다.
 CI에서는 SDK 라이선스 확인 옵션을 자동 적용하며 로컬 설정은 수동 확인을 유지한다.
 APK 내부 진입점·arm64 Python·TTS Java 클래스·글꼴/로고/라이선스 원본 해시와 사용자 데이터 제외를 확인한다.
-성공 시 `s2-toolbox-android-debug` 아티팩트에 APK와 SHA256SUMS를 저장한다.
+성공 시 `s2-toolbox-android-debug` 아티팩트에 APK·SHA256SUMS·APK_AUDIT.json을 저장한다.
+CI는 aapt로 패키지명·표시명·실행 Activity·최소/대상 API를 확인하고 apksigner로 서명을 검증한다.
+검사 스크립트의 `--android-tools`를 생략하면 ZIP/리소스 검사만 수행하며 보고서에도 이를 구분한다.
 이는 테스트용 디버그 빌드이며 실제 기기 설치·청취·출시 서명 검증은 별도다.
+
+최초 APK 생성: [Actions 41286132211](https://github.com/KoreanSniper/seoul2line-toolbox/actions/runs/41286132211),
+빌드 커밋 `7bbee71e72ae5dad93e33467c81a32f1aaf4ac0d`.
+파일 `s2toolbox-0.1.0-arm64-v8a-debug.apk`, 26,293,989바이트,
+SHA-256 `78a4ce18aca5b51e7889d76f320c7fccca1209ed55f9b241375233c3b720e44a`.
+공식 Build Tools 35로 패키지·API·디버그 서명을 확인했고 변조한 복사본의 서명 거부도 확인했다.
+최초 파일에는 사운드보드까지 포함하며 이후 추가한 시스템 바/Android 검사 모드는 다음 빌드에 반영한다.
 
 빌드 다음에는 Google APIs x86_64 이미지의 ARM 변환 기능을 이용해 Android API 30·35에서
 같은 arm64 APK를 설치하고 검사하도록 구성했다. 해당 이미지의 arm64 지원을 실행 시 확인하며,
@@ -136,7 +145,7 @@ Windows PowerShell에서 직접 Buildozer를 실행하지 않는다.
 6. 테스트 기기에 설치하여 실행·뒤로 가기·앱 전환·재시작·탭 고정을 확인한다.
 
 초기 대상: Android 8.0/API 26 이상, arm64-v8a, 세로 화면, target API 35.
-현재 빌드 설정은 초안이며 APK 생성·설치로 검증하기 전에는 Android 지원 확인으로 간주하지 않는다.
+APK 생성·리소스·메타데이터·서명 검사는 통과했으며 Android 실행·설치/장치별 동작은 별도로 확인한다.
 SDK/NDK 다운로드와 빌드에는 인터넷이 필요하다. 현재 단계는 Android 런타임 권한을 요청하지 않는다.
 TTS 엔진 검색을 위한 `<queries>` 항목과 Java 연결 클래스를 Buildozer에 등록했다.
 
