@@ -62,7 +62,7 @@ jobs:
       - name: Install Android build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git zip unzip autoconf automake autopoint gettext libtool pkg-config zlib1g-dev libncurses-dev libtinfo6 cmake libffi-dev libssl-dev
+          sudo apt-get install -y git zip unzip autoconf automake autopoint gettext libtool libltdl-dev pkg-config zlib1g-dev libncurses-dev libtinfo6 cmake libffi-dev libssl-dev
           python -m pip install -r mobile/build-requirements.txt
       - uses: actions/cache@v4
         with:
