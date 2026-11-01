@@ -28,7 +28,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb libgl1-mesa-dri libgles2 libmtdev1 xclip xsel
-          python -m pip install -r mobile/requirements.txt
+          python -m pip install -r mobile/test-requirements.txt
       - name: Run model tests
         run: python -m unittest discover -s mobile/tests -p 'test_*.py' -v
       - name: Run Kivy screens

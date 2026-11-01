@@ -42,6 +42,7 @@ PC 연결 및 TC 잔액을 실제 연결된 것처럼 표시하지 않으며 네
 ## 검증
 
 ```powershell
+py -m pip install -r mobile/test-requirements.txt
 py -m unittest mobile.tests.test_model -v
 py -m unittest mobile.tests.test_offline_tools -v
 py -m unittest mobile.tests.test_speech -v

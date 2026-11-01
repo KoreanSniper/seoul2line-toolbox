@@ -413,10 +413,17 @@
 
 ### 2026-11-01 16/34/52
 
-#### 021. Android TTS 연결과 GitHub Actions APK 빌드 추가 (해시)
+#### 021. Android TTS 연결과 GitHub Actions APK 빌드 추가 969b5a3240ffdc423c6660c97f9ba699ffaf56ba
 
 - Android 기본 TTS 엔진·한국어 오프라인 음성 조회, 읽기 속도/입력 제한, 발화 ID별 진행·완료·오류·중지, 엔진 교체·종료와 오래된 세션 무시를 연결했다. Windows에서는 실제 읽기를 비활성화한다.
 - TTS 화면의 엔진/음성/속도·입력·읽기/중지와 화면 이동/일시정지 중지를 구현했다. TTS 서비스 검색 queries와 Java 소스·PyJNIus를 Buildozer에 등록했다.
 - Google 공식 API 35 플랫폼 ZIP의 제공 해시를 확인하고 실제 android.jar로 Java 소스를 컴파일했다. 상태/도구 25개·TTS 제어 9개, 합계 34개 및 대역 엔진을 사용한 실제 Kivy 화면 검사를 통과했다. Android 합성·기기별 동작은 미검증이다.
 - 사용자가 선택한 GitHub Actions 방식으로 Linux 검사 후 arm64 APK를 생성하는 워크플로, 고정 Buildozer/p4a/NDK 설정, APK 내부 진입점·네이티브 Python·TTS 클래스·리소스 원본 해시와 개인 데이터 제외 검사를 추가했다. 빌드 성공 여부는 아직 확인 전이다.
 - TODO의 실제 완료 세부 항목 5개를 기록했다. codex/mobile-android 브랜치로 작업을 이동했으며 기존 사용자 .gitignore·시스템 모니터 미커밋 변경은 제외한다. 이전 기록의 해시 치환만 함께 포함한다. 목표는 활성 상태로 유지한다.
+
+
+**ㄴ** 021-1. Linux Kivy 화면 검사 의존성 분리 (해시)
+
+- 첫 Actions 실행 41285371837에서 모델 34개는 통과했으나 Kivy 합성 터치 도우미가 필요로 하는 pytest 누락으로 UI 검사가 중단됐다. APK 작업은 의존 검사 실패로 실행되지 않았다.
+- test-requirements.txt에 Kivy·pytest·Pillow를 명시하고 CI 및 수동 검사 안내를 해당 파일로 통일했다. 검사 의존성은 Android 실행 requirements에 추가하지 않았다. 고정한 패키지 버전의 배포 존재와 YAML 구성을 확인했다.
+- 사용자 선택에 따라 새 원격 브랜치 업로드와 Actions 실행을 확인했으며 수정 커밋으로 재검증한다. Android 빌드 성공·기기 검사는 미완료다.
