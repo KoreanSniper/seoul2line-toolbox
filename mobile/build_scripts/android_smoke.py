@@ -11,6 +11,11 @@ PACKAGE = 'io.seoul2line.s2toolbox'
 ACTIVITY = 'org.kivy.android.PythonActivity'
 
 
+def check(condition, message='Android 검사 보고서 조건 불일치'):
+    if not condition:
+        raise AssertionError(message)
+
+
 def adb(*args, check=True, timeout=60):
     result = subprocess.run(['adb',*map(str,args)],stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=timeout)
     if check and result.returncode:
@@ -35,16 +40,16 @@ def wait_report(run, phase, timeout=180):
 
 
 def validate(report, phase):
-    assert report.get('status')=='passed' and report.get('phase')==phase
+    check(report.get('status')=='passed' and report.get('phase')==phase)
     checks = set(report.get('checks',[]))
     if phase == 1:
         required = {'android_home_five_tabs','three_themes','five_tab_bindings_and_back','personalization_saved',
                     'offline_converter','note_saved_on_navigation','android_local_audio_import','android_mediaplayer_completion'}
-        assert required <= checks, f'Android 검사 누락: {required-checks}'
-        assert checks & {'android_tts_catalogue','android_tts_no_offline_voice_handled'}, '네이티브 TTS 응답 누락'
+        check(required <= checks,f'Android 검사 누락: {required-checks}')
+        check(checks & {'android_tts_catalogue','android_tts_no_offline_voice_handled'},'네이티브 TTS 응답 누락')
     else:
-        assert 'real_process_restart_theme_pins_note_audio' in checks
-    assert report.get('width',0)>0 and report.get('height',0)>0
+        check('real_process_restart_theme_pins_note_audio' in checks)
+    check(report.get('width',0)>0 and report.get('height',0)>0,'Android 화면 크기 누락')
 
 
 def run(apk, output, commit):
@@ -53,14 +58,14 @@ def run(apk, output, commit):
     checksum_file = apk.parent/'SHA256SUMS.txt'
     if checksum_file.exists():
         rows = [line.split(maxsplit=1) for line in checksum_file.read_text().splitlines() if line.strip()]
-        assert any(hash_==digest and Path(name.lstrip('*')).name==apk.name for hash_,name in rows), '빌드 APK 해시 불일치'
+        check(any(hash_==digest and Path(name.lstrip('*')).name==apk.name for hash_,name in rows),'빌드 APK 해시 불일치')
     run_id = uuid.uuid4().hex[:16]
     reports = []
     try:
         adb('wait-for-device')
         abi = adb('shell','getprop','ro.product.cpu.abilist').stdout.decode().strip()
         api = adb('shell','getprop','ro.build.version.sdk').stdout.decode().strip()
-        assert 'arm64-v8a' in abi, f'이 에뮬레이터는 arm64 APK를 실행할 수 없습니다: {abi}'
+        check('arm64-v8a' in abi,f'이 에뮬레이터는 arm64 APK를 실행할 수 없습니다: {abi}')
         adb('logcat','-c')
         adb('install','-r',apk,timeout=120)
         for phase in (1,2):

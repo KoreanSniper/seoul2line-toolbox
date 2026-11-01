@@ -10,6 +10,12 @@ NOTE = 'Android 프로세스 종료 후 복원 검사'
 PINS = {'menu1':'notes','menu2':'pc','tool1':'converter'}
 
 
+def check(condition, message='Android 검사 조건을 충족하지 못했습니다.'):
+    # APK의 -OO 바이트컴파일에서도 검사 조건을 유지한다.
+    if not condition:
+        raise AssertionError(message)
+
+
 def requested():
     from jnius import autoclass
     activity = autoclass('org.kivy.android.PythonActivity').mActivity
@@ -68,7 +74,7 @@ class AndroidSmoke:
         Clock.schedule_once(lambda _: self.app.root.export_to_png(str(self.root/name)),.2)
 
     def dark_home(self):
-        assert len(self.app.nav_buttons)==5
+        check(len(self.app.nav_buttons)==5,'하단 탭이 5개가 아닙니다.')
         self.app.theme('dark')
         self.app.go('home')
         self.capture('home-dark.png')
@@ -87,31 +93,31 @@ class AndroidSmoke:
         for slot in ('menu1','menu2','home','tool1','settings'):
             expected = self.app.state.tabs().get(slot,slot)
             self.app.nav_buttons[slot].dispatch('on_release')
-            assert self.app.page == expected
+            check(self.app.page == expected,f'{slot} 탭 이동 실패')
         self.app.back(None,27)
-        assert self.app.page == 'home'
+        check(self.app.page == 'home','뒤로 가기 실패')
         self.checks.append('five_tab_bindings_and_back')
 
     def personalize(self):
         for slot,key in PINS.items():
             self.app.state.pin(slot,key)
         self.app.persist()
-        assert self.app.state.tabs()==PINS
+        check(self.app.state.tabs()==PINS,'탭 고정 실패')
         self.checks.append('personalization_saved')
 
     def converter(self):
         self.app.go('converter')
         self.app.converter_input.text = '{"도구":"Android", "정수":12345678901234567890}'
         self.app.run_converter()
-        assert '12345678901234567890' in self.app.converter_output.text
-        assert '도구' in self.app.converter_output.text
+        check('12345678901234567890' in self.app.converter_output.text,'변환 정밀도 손실')
+        check('도구' in self.app.converter_output.text,'한국어 변환 결과 누락')
         self.checks.append('offline_converter')
 
     def note(self):
         self.app.go('scratchpad')
         self.app.note_input.text = NOTE
         self.app.go('home')
-        assert self.app.scratchpad.path.read_text(encoding='utf-8')==NOTE
+        check(self.app.scratchpad.path.read_text(encoding='utf-8')==NOTE,'메모 저장 실패')
         self.checks.append('note_saved_on_navigation')
 
     def import_audio(self):
@@ -125,7 +131,7 @@ class AndroidSmoke:
     def wait_audio_import(self):
         if not self.wait(not self.app.soundboard.busy):
             return False
-        assert len(self.app.soundboard.library.items)==1
+        check(len(self.app.soundboard.library.items)==1,'오디오 등록 실패')
         self.checks.append('android_local_audio_import')
 
     def play_audio(self):
@@ -137,7 +143,7 @@ class AndroidSmoke:
             raise AssertionError(status)
         if not self.wait(status=='재생을 마쳤습니다.'):
             return False
-        assert not self.app.soundboard.active_id
+        check(not self.app.soundboard.active_id,'오디오 완료 상태 갱신 실패')
         self.checks.append('android_mediaplayer_completion')
 
     def start_tts(self):
@@ -147,25 +153,25 @@ class AndroidSmoke:
     def wait_tts(self):
         if not self.wait(self.app.speech.catalogue_received):
             return False
-        assert self.app.speech.backend is not None
-        assert self.app.speech.ready == bool(self.app.speech.voices)
+        check(self.app.speech.backend is not None,'네이티브 TTS 연결 실패')
+        check(self.app.speech.ready == bool(self.app.speech.voices),'TTS 준비 상태 불일치')
         self.checks.append('android_tts_catalogue' if self.app.speech.ready else 'android_tts_no_offline_voice_handled')
         self.capture('tts-catalogue.png')
 
     def complete_home(self):
         self.app.go('home')
-        assert not self.app.speech.active_id
-        assert not self.app.soundboard.active_id
+        check(not self.app.speech.active_id,'화면 이동 시 TTS 중지 실패')
+        check(not self.app.soundboard.active_id,'화면 이동 시 오디오 중지 실패')
         self.capture('home-final.png')
 
     def restored(self):
-        assert self.app.state.theme=='green'
-        assert self.app.state.pins==PINS
-        assert self.app.state.tabs()==PINS
-        assert self.app.scratchpad.text==NOTE
-        assert len(self.app.soundboard.library.items)==1
-        assert self.app.soundboard.library.path_for(self.app.soundboard.library.items[0]['id']).is_file()
-        assert len(self.app.nav_buttons)==5
+        check(self.app.state.theme=='green','테마 복원 실패')
+        check(self.app.state.pins==PINS,'고정값 복원 실패')
+        check(self.app.state.tabs()==PINS,'하단 탭 복원 실패')
+        check(self.app.scratchpad.text==NOTE,'메모 복원 실패')
+        check(len(self.app.soundboard.library.items)==1,'오디오 목록 복원 실패')
+        check(self.app.soundboard.library.path_for(self.app.soundboard.library.items[0]['id']).is_file(),'오디오 파일 복원 실패')
+        check(len(self.app.nav_buttons)==5,'복원 후 하단 탭 누락')
         self.capture('home-restored.png')
         self.checks.append('real_process_restart_theme_pins_note_audio')
 

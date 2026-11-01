@@ -30,7 +30,9 @@ jobs:
           sudo apt-get install -y xvfb libgl1-mesa-dri libgles2 libmtdev1 xclip xsel
           python -m pip install -r mobile/test-requirements.txt
       - name: Run model tests
-        run: python -m unittest discover -s mobile/tests -p 'test_*.py' -v
+        run: |
+          python -m unittest discover -s mobile/tests -p 'test_*.py' -v
+          python -OO -m unittest mobile.tests.test_android_qa -v
       - name: Run Kivy screens
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"

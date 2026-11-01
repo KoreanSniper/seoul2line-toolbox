@@ -2,7 +2,7 @@ from types import SimpleNamespace
 import sys
 import unittest
 from unittest.mock import patch
-from mobile.android_qa import requested
+from mobile.android_qa import requested, AndroidSmoke
 from mobile.build_scripts.android_smoke import validate
 
 
@@ -32,6 +32,12 @@ class AndroidQAGateTests(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 validate(report,1)
         validate(dict(status='passed',phase=2,checks=['real_process_restart_theme_pins_note_audio'],width=1080,height=1900),2)
+
+    def test_device_checks_are_enforced_in_optimized_bytecode(self):
+        probe = object.__new__(AndroidSmoke)
+        probe.app = SimpleNamespace(state=SimpleNamespace(theme='dark'))
+        with self.assertRaisesRegex(AssertionError,'테마 복원'):
+            probe.restored()
 
 
 if __name__ == '__main__':
