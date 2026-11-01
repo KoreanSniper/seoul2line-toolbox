@@ -33,14 +33,17 @@ try:
     from .offline_tools import (Scratchpad, format_json, encode_base64, decode_base64,
                                 convert_base, MAX_NOTE)
     from .speech import SpeechController, AndroidSpeechBackend
+    from .audio import SoundboardController, KivyAudioBackend, AndroidAudioBackend
 except ImportError:
     from model import State, THEMES, MENUS, TOOLS
     from offline_tools import (Scratchpad, format_json, encode_base64, decode_base64,
                                convert_base, MAX_NOTE)
     from speech import SpeechController, AndroidSpeechBackend
+    from audio import SoundboardController, KivyAudioBackend, AndroidAudioBackend
 
 ASSETS = Path(__file__).resolve().parent / 'assets'
 LabelBase.register(name='S2Korean', fn_regular=str(ASSETS / 'NanumGothic-Regular.ttf'))
+LabelBase.register(name='Roboto', fn_regular=str(ASSETS / 'NanumGothic-Regular.ttf'))
 
 
 class Surface(BoxLayout):
@@ -193,6 +196,10 @@ class ToolboxApp(App):
         self.converter = dict(operation='JSON 정리', text='', result='', status='', source='10', target='16')
         self.speech_text, self.speech_rate = '', '1.0'
         self.speech = SpeechController(AndroidSpeechBackend if platform == 'android' else None, self.speech_changed)
+        self.soundboard = SoundboardController(Path(self.user_data_dir) / 'audio',
+                                               AndroidAudioBackend if platform == 'android' else KivyAudioBackend,
+                                               self.soundboard_changed,
+                                               lambda call: Clock.schedule_once(lambda _: call(),0))
         self.page = 'home'
         self.root_box = BoxLayout(orientation='vertical')
         self.root_box.bind(size=self.fit_note)
@@ -228,6 +235,8 @@ class ToolboxApp(App):
         self.flush_note()
         if self.page == 'tts' and key != 'tts':
             self.speech.stop()
+        if self.page == 'soundboard' and key != 'soundboard':
+            self.soundboard.stop()
         self.state.visit(key)
         self.page = key
         self.persist()
@@ -306,6 +315,8 @@ class ToolboxApp(App):
             self.build_scratchpad()
         elif self.page == 'tts':
             self.build_speech()
+        elif self.page == 'soundboard':
+            self.build_soundboard()
         elif self.page == 'settings':
             add(self.label('설정', 26, height=46))
             add(self.label('내 Toolbox의 분위기', 15))
@@ -404,6 +415,7 @@ class ToolboxApp(App):
 
     def on_pause(self):
         self.speech.stop()
+        self.soundboard.stop()
         self.flush_note()
         self.persist()
         return True
@@ -411,6 +423,10 @@ class ToolboxApp(App):
     def on_stop(self):
         try:
             self.speech.close()
+        except Exception:
+            pass
+        try:
+            self.soundboard.close()
         except Exception:
             pass
         self.flush_note()
@@ -618,6 +634,71 @@ class ToolboxApp(App):
         elif hasattr(self,'speech_status'):
             self.speech_status.text = self.speech.status
             self.speech_play.disabled = not self.speech.ready
+
+    def build_soundboard(self):
+        add = self.content.add_widget
+        add(self.label('사운드보드', 26, height=46))
+        add(self.label('내 소리를 기기에 보관 · 파일당 25MiB · 최대 40개', 12, True, 40))
+        self.audio_import = self.button('오디오 파일 가져오기', self.choose_audio, True)
+        self.audio_import.disabled = self.soundboard.busy or not self.soundboard.library.readable
+        add(self.audio_import)
+        add(self.button('재생 중지', self.soundboard.stop))
+        self.audio_status = self.label(self.soundboard.status, 12, True, 64)
+        add(self.audio_status)
+        if not self.soundboard.library.items:
+            add(self.label('아직 보관한 사운드가 없습니다.', 14, True, 56))
+        for item in self.soundboard.library.items:
+            card = Surface(self.colors['panel'],self.colors['border'],orientation='vertical',
+                           size_hint_y=None,height=dp(156),padding=dp(12),spacing=dp(6))
+            card.add_widget(self.label(item['name'],15,height=36))
+            card.add_widget(self.label(f"{item['extension'][1:].upper()} · {item['bytes']/1024/1024:.2f}MiB",12,True,24))
+            row = BoxLayout(size_hint_y=None,height=dp(52),spacing=dp(8))
+            row.add_widget(self.button('재생',lambda key=item['id']: self.soundboard.play(key),True))
+            remove = self.button('제거',lambda key=item['id']: self.confirm_audio_remove(key))
+            remove.disabled = self.soundboard.busy
+            row.add_widget(remove)
+            card.add_widget(row)
+            add(card)
+
+    def soundboard_changed(self, catalogue=False):
+        if self.page != 'soundboard':
+            return
+        if catalogue:
+            self.render()
+        elif hasattr(self,'audio_status'):
+            self.audio_status.text = self.soundboard.status
+            self.audio_import.disabled = self.soundboard.busy or not self.soundboard.library.readable
+
+    def choose_audio(self):
+        if self.soundboard.busy:
+            return
+        if platform == 'android':
+            self.soundboard.choose_android()
+            return
+        from kivy.uix.filechooser import FileChooserListView
+        chooser = FileChooserListView(path=str(Path.home()),filters=['*.wav','*.mp3','*.ogg','*.flac','*.m4a','*.aac','*.opus'],
+                                      multiselect=False)
+        box = BoxLayout(orientation='vertical',spacing=dp(8),padding=dp(8))
+        box.add_widget(chooser)
+        popup = Popup(title='오디오 파일 선택',title_font='S2Korean',content=box,size_hint=(.95,.9))
+        def select():
+            if chooser.selection:
+                popup.dismiss()
+                self.soundboard.import_file(chooser.selection[0])
+        box.add_widget(self.button('선택한 파일 가져오기',select,True))
+        box.add_widget(self.button('취소',popup.dismiss))
+        popup.open()
+
+    def confirm_audio_remove(self, key):
+        box = BoxLayout(orientation='vertical',padding=dp(12),spacing=dp(8))
+        box.add_widget(self.label('앱에 보관한 사운드를 제거할까요?\n원본 파일은 유지됩니다.',13,height=72))
+        popup = Popup(title='사운드 제거',title_font='S2Korean',content=box,size_hint=(.92,None),height=dp(260))
+        def remove():
+            popup.dismiss()
+            self.soundboard.remove(key)
+        box.add_widget(self.button('제거',remove,True))
+        box.add_widget(self.button('취소',popup.dismiss))
+        popup.open()
 
 
 if __name__ == '__main__':

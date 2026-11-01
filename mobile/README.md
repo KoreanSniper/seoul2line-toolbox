@@ -21,7 +21,8 @@ py mobile/main.py
 
 개발자 변환기와 스크래치패드는 오프라인으로 동작한다.
 TTS는 Android 기본 엔진 연결 코드를 구현했으며 실제 기기의 음성 출력은 검증 전이다.
-사운드보드·PC 연결·TC 동기화는 아직 준비 안내 화면이다.
+사운드보드는 로컬 파일 보관과 재생을 구현했고 Android 시스템 파일 선택/출력은 기기 검증 전이다.
+PC 연결·TC 동기화는 아직 준비 안내 화면이다.
 PC 연결 및 TC 잔액을 실제 연결된 것처럼 표시하지 않으며 네트워크 요청도 하지 않는다.
 
 ## 데이터와 리소스
@@ -46,9 +47,11 @@ py -m pip install -r mobile/test-requirements.txt
 py -m unittest mobile.tests.test_model -v
 py -m unittest mobile.tests.test_offline_tools -v
 py -m unittest mobile.tests.test_speech -v
+py -m unittest mobile.tests.test_audio -v
 py -m mobile.tests.smoke_ui
 py -m mobile.tests.smoke_offline
 py -m mobile.tests.smoke_speech
+py -m mobile.tests.smoke_audio
 ```
 
 두 번째 명령은 실제 Kivy 창을 실행한다. 임시 설정 경로로 홈·검색·설정·PC 메뉴와
@@ -74,6 +77,19 @@ TTS 화면에서 엔진을 준비한 뒤 설치된 엔진·한국어 음성·속
 음성이 없으면 Android 시스템 TTS 설정에서 한국어 오프라인 데이터를 먼저 설치해야 한다.
 Windows 미리보기에서는 읽기 기능을 비활성화한다. PC TTS·신경망 모델을 가져오지 않는다.
 현재 제어 상태 검사와 API 35 Java 컴파일 검사를 통과했으나 실제 합성·기기별 엔진 차이는 검증하지 않았다.
+
+## 사운드보드
+
+파일 가져오기로 WAV·MP3·OGG·FLAC·M4A·AAC·OPUS를 최대 40개, 파일당 25MiB까지 앱 전용 경로에 복사한다.
+실제로 재생 가능한 형식은 기기의 디코더에 따라 달라지며 실패 시 상태 메시지를 표시한다.
+Android는 시스템 문서 선택창에서 사용자가 선택한 파일만 읽는다. 전체 저장소 접근 권한은 요청하지 않는다.
+파일은 한 번 복사한 후 원본 URI 권한이나 PC 연결 없이 재생한다. 클라우드 제공자를 선택하면 가져올 때 연결이 필요할 수 있다.
+선택 취소·크기 제한·빈 파일·목록 저장 실패 시 이번 임시 복사본을 정리하고 원본을 유지한다.
+목록은 `App.user_data_dir/audio/library.json`, 실제 파일은 같은 폴더의 UUID 이름으로 저장한다.
+제거는 확인창 후 앱 복사본에만 적용하고 목록 저장 실패 시 파일 이동을 되돌린다.
+화면 이동·앱 일시정지·종료 시 재생을 정리한다. Android는 MediaPlayer, 데스크톱 미리보기는 Kivy SDL을 사용한다.
+`smoke_audio`는 실제 WAV 디코더와 SDL dummy 오디오 출력을 검사하며 스피커 소리를 내지 않는다.
+Android 파일 선택·앱 복귀·기기 출력·오디오 포커스와 각 압축 형식은 실기기 검사 항목이다.
 
 ## GitHub Actions 빌드
 
@@ -109,6 +125,7 @@ TTS 엔진 검색을 위한 `<queries>` 항목과 Java 연결 클래스를 Build
 - [나눔고딕 원본과 라이선스](https://github.com/google/fonts/tree/main/ofl/nanumgothic)
 - [Android TTS API](https://developer.android.com/reference/android/speech/tts/TextToSpeech)
 - [Android 발화 진행 콜백](https://developer.android.com/reference/android/speech/tts/UtteranceProgressListener)
+- [Android 시스템 문서 선택](https://developer.android.com/training/data-storage/shared/documents-files)
 
 ## 후속 설계
 

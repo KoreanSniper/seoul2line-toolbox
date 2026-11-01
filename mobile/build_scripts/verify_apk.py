@@ -17,6 +17,7 @@ def verify(path):
         assert dex, '실행 DEX 누락'
         assert any(n.startswith('lib/arm64-v8a/') and 'libpython' in n for n in names), 'arm64 Python 라이브러리 누락'
         assert any(b'Lio/seoul2line/toolbox/SpeechBridge;' in apk.read(n) for n in dex), 'TTS Java 연결 코드 누락'
+        assert any(b'Lio/seoul2line/toolbox/AudioBridge;' in apk.read(n) for n in dex), '오디오 Java 연결 코드 누락'
         with tarfile.open(fileobj=io.BytesIO(apk.read('assets/private.tar')), mode='r:*') as private:
             members = {n.name.lstrip('./'):n for n in private.getmembers() if n.isfile()}
             assert any(PurePosixPath(n).name in ('main.py','main.pyc') for n in members), '앱 진입점 누락'

@@ -38,6 +38,7 @@ jobs:
           xvfb-run -a python -m mobile.tests.smoke_ui
           xvfb-run -a python -m mobile.tests.smoke_offline
           xvfb-run -a python -m mobile.tests.smoke_speech
+          xvfb-run -a python -m mobile.tests.smoke_audio
       - uses: actions/upload-artifact@v4
         if: always()
         with:
